@@ -4,7 +4,7 @@ To use spark as client to connect to a remote spark cluster, we need to modify t
 - %SPARK_HOME%\conf\spark-defaults.conf (spark conf)
 - %SPARK_HOME%\conf\spark-env.cmd ()
 - %HADOOP_HOME%\etc\hadoop\core-site.xml (hdfs conf)
-- 
+- %HADOOP_HOME%\etc\hadoop\yarn-site.xml (yarn conf)
 
 
 ## spark-defaults.conf
