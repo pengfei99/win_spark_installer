@@ -1,47 +1,56 @@
 <#
 .SYNOPSIS
-    Step 1: Detects existing Spark installations on Windows Server.
+    Step 1: Detects existing Java installations on Windows Server.
+    Step 2: Detects existing hadoop installations on Windows Server.
+    Step 3: Detects existing Spark installations on Windows Server.
 #>
 [CmdletBinding()]
 param()
 
 Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host " STEP 1: DETECTING EXISTING SPARK INSTALL " -ForegroundColor Cyan
+Write-Host " STEP 1: DETECTING EXISTING JDK INSTALL " -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 
-$SparkDetected = $false
-$ExistingPath = $null
+# Acquire the active user's identity dynamically
+$CurrentUser = [Environment]::UserName
+$UserAppData  = $env:LOCALAPPDATA
 
-# Check System Environment Variable
-$SparkHomeEnv = [Environment]::GetEnvironmentVariable("SPARK_HOME", [EnvironmentVariableTarget]::Machine)
+$JdkDetected = $false
+$JdkPath     = $null
 
-if (-not [string]::IsNullOrEmpty($SparkHomeEnv)) {
-    Write-Host "[!] SPARK_HOME environment variable found: $SparkHomeEnv" -ForegroundColor Yellow
-    if (Test-Path $SparkHomeEnv) {
-        $SparkDetected = $true
-        $ExistingPath = $SparkHomeEnv
+# step1. Detects existing Java installations on Windows Server.
+
+# 1.1 Check Environment Variable of the user account
+$JdkEnvName="JAVA_HOME"
+$JdkEnvVal = [Environment]::GetEnvironmentVariable($JdkEnvName, [EnvironmentVariableTarget]::Machine)
+
+if (-not [string]::IsNullOrEmpty($JdkEnvVal)) {
+    Write-Host "[!] $JdkEnvName environment variable found: $JdkEnvVal" -ForegroundColor Yellow
+    if (Test-Path "$JdkEnvVal\bin\java.exe") {
+        $JdkDetected = $true
+        $JdkExistingPath = $JdkEnvVal
     }
 }
 
-# Check Common Installation Paths
-$CommonPaths = @("C:\spark", "C:\BigData\spark", "C:\hadoop\spark")
-foreach ($Path in $CommonPaths) {
-    if (Test-Path "$Path\bin\spark-submit.cmd") {
-        Write-Host "[!] Spark binary detected at path: $Path" -ForegroundColor Yellow
-        $SparkDetected = $true
-        $ExistingPath = $Path
-    }
+# 1.2 if no env var set for jdk or jdk path invalid, check JDK Installation Path manually
+$_ExpectedJdkPath = "C:\Users\" + $_currentUser + "\AppData\Local\java\"
+
+if (Test-Path "$_ExpectedJdkPath\bin\java.exe") {
+    Write-Host "[!] Spark binary detected at path: $Path" -ForegroundColor Yellow
+    $JdkDetected = $true
+    $JdkExistingPath = $_ExpectedJdkPath
 }
+
 
 $Result = [PSCustomObject]@{
-    IsInstalled   = $SparkDetected
-    DetectedPath  = $ExistingPath
+    JdkIsInstalled   = $JdkDetected
+    JdkPath  = $JdkExistingPath
 }
 
-if ($SparkDetected) {
-    Write-Host "[-] Detection Complete: Spark is ALREADY installed at '$ExistingPath'." -ForegroundColor Yellow
+if ($JdkDetected) {
+    Write-Host "[-] Detection Complete: JDK is ALREADY installed at '$JdkExistingPath'." -ForegroundColor Yellow
 } else {
-    Write-Host "[+] Detection Complete: No existing Spark installation detected." -ForegroundColor Green
+    Write-Host "[+] Detection Complete: No existing JDK installation detected." -ForegroundColor Green
 }
 
 return $Result
