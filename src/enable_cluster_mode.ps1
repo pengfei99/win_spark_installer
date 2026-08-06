@@ -22,18 +22,19 @@
 
 [CmdletBinding()]
 param(
-    # Directory containing your custom configuration files.
-    [string]$ConfigSourceDir = 'C:\Users\pliu\Documents\git\win_spark_installer\clusters',
+# Directory containing your custom configuration files.
+    [string]$ConfigSourceDir,
 
-    # Individual source files. If empty, they default to files under ConfigSourceDir.
+# Individual source files. If empty, they default to files under ConfigSourceDir.
     [string]$CoreSiteXmlSource,
     [string]$HdfsSiteXmlSource,
     [string]$YarnSiteXmlSource,
     [string]$SparkDefaultsConfSource,
-    [string]$SparkPyConfSource,
-    [string]$SparkRConfSource,
+    [string]$SparkCasdConfSource,
+    [string]$sparkCasdDirName = "casd",
 
-    # Optionally run hdfs/yarn command checks after TCP checks.
+
+# Optionally run hdfs/yarn command checks after TCP checks.
     [switch]$UseHadoopCommandChecks
 )
 
@@ -43,77 +44,93 @@ Set-StrictMode -Version Latest
 # ------------------------------------------------------------------
 # Default source file paths
 # ------------------------------------------------------------------
-if ([string]::IsNullOrWhiteSpace($CoreSiteXmlSource)) {
+if ( [string]::IsNullOrWhiteSpace($ConfigSourceDir))
+{
+    $ConfigSourceDir = Join-Path $PSScriptRoot 'clusters'
+}
+
+if ( [string]::IsNullOrWhiteSpace($CoreSiteXmlSource))
+{
     $CoreSiteXmlSource = Join-Path $ConfigSourceDir 'core-site.xml'
 }
 
-if ([string]::IsNullOrWhiteSpace($HdfsSiteXmlSource)) {
+if ( [string]::IsNullOrWhiteSpace($HdfsSiteXmlSource))
+{
     $HdfsSiteXmlSource = Join-Path $ConfigSourceDir 'hdfs-site.xml'
 }
 
-if ([string]::IsNullOrWhiteSpace($YarnSiteXmlSource)) {
+if ( [string]::IsNullOrWhiteSpace($YarnSiteXmlSource))
+{
     $YarnSiteXmlSource = Join-Path $ConfigSourceDir 'yarn-site.xml'
 }
 
-if ([string]::IsNullOrWhiteSpace($SparkDefaultsConfSource)) {
+if ( [string]::IsNullOrWhiteSpace($SparkDefaultsConfSource))
+{
     $SparkDefaultsConfSource = Join-Path $ConfigSourceDir 'spark-defaults.conf'
 }
 
-if ([string]::IsNullOrWhiteSpace($SparkPyConfSource)) {
-    $SparkPyConfSource = Join-Path $ConfigSourceDir 'casd_spark.py'
+if ( [string]::IsNullOrWhiteSpace($SparkCasdConfSource))
+{
+    $SparkCasdConfSource = Join-Path $ConfigSourceDir $sparkCasdDirName
 }
 
-if ([string]::IsNullOrWhiteSpace($SparkRConfSource)) {
-    $SparkRConfSource = Join-Path $ConfigSourceDir 'casd_spark.R'
-}
 
 # ------------------------------------------------------------------
 # Console helpers
 # ------------------------------------------------------------------
-function Write-Info {
+function Write-Info
+{
     param([string]$Message)
     Write-Host "[INFO] $Message" -ForegroundColor Cyan
 }
 
-function Write-Ok {
+function Write-Ok
+{
     param([string]$Message)
     Write-Host "[OK] $Message" -ForegroundColor Green
 }
 
-function Write-Warn {
+function Write-Warn
+{
     param([string]$Message)
     Write-Host "[WARN] $Message" -ForegroundColor Yellow
 }
 
-function Write-Err {
+function Write-Err
+{
     param([string]$Message)
     Write-Host "[ERROR] $Message" -ForegroundColor Red
 }
 
-function Write-Step {
+function Write-Step
+{
     param([string]$Message)
     Write-Host "`n==> $Message" -ForegroundColor Magenta
 }
 
 # ------------------------------------------------------------------
-# Config copy helper
+# Config file copy helper
 # ------------------------------------------------------------------
-function Copy-ClusterConfigFile {
+function Copy-ClusterConfigFile
+{
     param(
         [string]$SourceFile,
         [string]$DestinationDir,
         [string]$DestinationFileName
     )
 
-    if ([string]::IsNullOrWhiteSpace($SourceFile)) {
+    if ( [string]::IsNullOrWhiteSpace($SourceFile))
+    {
         throw 'Configuration source file path is empty.'
     }
 
-    if (-not (Test-Path -LiteralPath $SourceFile -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath $SourceFile -PathType Leaf))
+    {
         throw "Required configuration file not found: '$SourceFile'"
     }
 
-    if (-not (Test-Path -LiteralPath $DestinationDir)) {
+    if (-not (Test-Path -LiteralPath $DestinationDir))
+    {
         Write-Info "Creating directory: $DestinationDir"
         New-Item -ItemType Directory -Path $DestinationDir -Force | Out-Null
     }
@@ -121,21 +138,25 @@ function Copy-ClusterConfigFile {
     $destinationFile = Join-Path $DestinationDir $DestinationFileName
 
     # If source and destination are the same file, do nothing.
-    try {
+    try
+    {
         $sourceResolved = (Get-Item -LiteralPath $SourceFile -ErrorAction Stop).FullName
 
         if ((Test-Path -LiteralPath $destinationFile) -and
-            ((Get-Item -LiteralPath $destinationFile -ErrorAction Stop).FullName -eq $sourceResolved)) {
+                ((Get-Item -LiteralPath $destinationFile -ErrorAction Stop).FullName -eq $sourceResolved))
+        {
             Write-Info "Source and destination are the same file: $destinationFile"
             return $destinationFile
         }
     }
-    catch {
+    catch
+    {
         # Ignore resolution issues and continue.
     }
 
     # Backup existing destination file.
-    if (Test-Path -LiteralPath $destinationFile) {
+    if (Test-Path -LiteralPath $destinationFile)
+    {
         $timestamp = Get-Date -Format 'yyyyMMddHHmmss'
         $backupFile = "{0}.backup.{1}" -f $destinationFile, $timestamp
 
@@ -150,38 +171,109 @@ function Copy-ClusterConfigFile {
     return $destinationFile
 }
 
+# ------------------------------------------------------------------
+# Config folder copy helper
+# ------------------------------------------------------------------
+function Copy-CustomConfFolder
+{
+    param(
+        [string]$SourceDir,
+        [string]$DestinationDir
+    )
+
+    if (-not (Test-Path -LiteralPath $SourceDir -PathType Container))
+    {
+        throw "Custom configuration folder not found: '$SourceDir'"
+    }
+
+    if (-not (Test-Path -LiteralPath $DestinationDir))
+    {
+        Write-Info "Creating directory: $DestinationDir"
+        New-Item -ItemType Directory -Path $DestinationDir -Force | Out-Null
+    }
+
+    $files = @(Get-ChildItem -LiteralPath $SourceDir -Recurse -File -Force)
+
+    if ($files.Count -eq 0)
+    {
+        Write-Warn "Custom configuration folder is empty: '$SourceDir'"
+        return @()
+    }
+
+    $sourceRoot = $SourceDir.TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+    $separator = [System.IO.Path]::DirectorySeparatorChar
+
+    $copiedFiles = @()
+
+    foreach ($file in $files)
+    {
+        $relativePath = $file.FullName.Substring($sourceRoot.Length).TrimStart($separator)
+        $targetFile = Join-Path $DestinationDir $relativePath
+        $targetDir = Split-Path $targetFile -Parent
+
+        if (-not (Test-Path -LiteralPath $targetDir))
+        {
+            Write-Info "Creating directory: $targetDir"
+            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+        }
+
+        if (Test-Path -LiteralPath $targetFile)
+        {
+            $timestamp = Get-Date -Format 'yyyyMMddHHmmss'
+            $backupFile = "{0}.backup.{1}" -f $targetFile, $timestamp
+
+            Write-Info "Backing up existing file: $targetFile"
+            Copy-Item -LiteralPath $targetFile -Destination $backupFile -Force
+            Write-Info "Backup created: $backupFile"
+        }
+
+        Copy-Item -LiteralPath $file.FullName -Destination $targetFile -Force
+        Write-Ok "Copied '$( $file.FullName )' to '$targetFile'"
+
+        $copiedFiles += $targetFile
+    }
+
+    return $copiedFiles
+}
+
 
 # ------------------------------------------------------------------
 # Optional Hadoop command check helper
 # ------------------------------------------------------------------
-function Test-HadoopCommand {
+function Test-HadoopCommand
+{
     param(
         [string]$CommandPath,
         [string[]]$CommandArgs,
         [string]$Description
     )
 
-    if (-not (Test-Path -LiteralPath $CommandPath -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath $CommandPath -PathType Leaf))
+    {
         Write-Warn "Command not found: '$CommandPath'. Skipping $Description."
         return $false
     }
 
-    Write-Info "Running: $CommandPath $($CommandArgs -join ' ')"
+    Write-Info "Running: $CommandPath $( $CommandArgs -join ' ' )"
 
-    try {
+    try
+    {
         & $CommandPath @CommandArgs | Out-Null
 
-        if ($LASTEXITCODE -eq 0) {
+        if ($LASTEXITCODE -eq 0)
+        {
             Write-Ok "$Description succeeded."
             return $true
         }
-        else {
+        else
+        {
             Write-Warn "$Description failed with exit code $LASTEXITCODE."
             return $false
         }
     }
-    catch {
-        Write-Warn "$Description failed: $($_.Exception.Message)"
+    catch
+    {
+        Write-Warn "$Description failed: $( $_.Exception.Message )"
         return $false
     }
 }
@@ -189,35 +281,41 @@ function Test-HadoopCommand {
 # ------------------------------------------------------------------
 # Main script
 # ------------------------------------------------------------------
-try {
+try
+{
     # --------------------------------------------------------------
     # Step 1: Detect SPARK_HOME and HADOOP_HOME
     # --------------------------------------------------------------
     Write-Step 'Step 1: Detect user SPARK_HOME and HADOOP_HOME'
 
-    $sparkHome  = [Environment]::GetEnvironmentVariable('SPARK_HOME', 'User')
+    $sparkHome = [Environment]::GetEnvironmentVariable('SPARK_HOME', 'User')
     $hadoopHome = [Environment]::GetEnvironmentVariable('HADOOP_HOME', 'User')
 
-    if ([string]::IsNullOrWhiteSpace($sparkHome) -or [string]::IsNullOrWhiteSpace($hadoopHome)) {
+    if ([string]::IsNullOrWhiteSpace($sparkHome) -or [string]::IsNullOrWhiteSpace($hadoopHome))
+    {
         Write-Err 'user must install spark first'
 
-        if ([string]::IsNullOrWhiteSpace($sparkHome)) {
+        if ( [string]::IsNullOrWhiteSpace($sparkHome))
+        {
             Write-Err 'Missing user environment variable: SPARK_HOME'
         }
 
-        if ([string]::IsNullOrWhiteSpace($hadoopHome)) {
+        if ( [string]::IsNullOrWhiteSpace($hadoopHome))
+        {
             Write-Err 'Missing user environment variable: HADOOP_HOME'
         }
 
         exit 1
     }
 
-    if (-not (Test-Path -LiteralPath $sparkHome -PathType Container)) {
+    if (-not (Test-Path -LiteralPath $sparkHome -PathType Container))
+    {
         Write-Err "SPARK_HOME exists but is not a valid directory: '$sparkHome'"
         exit 1
     }
 
-    if (-not (Test-Path -LiteralPath $hadoopHome -PathType Container)) {
+    if (-not (Test-Path -LiteralPath $hadoopHome -PathType Container))
+    {
         Write-Err "HADOOP_HOME exists but is not a valid directory: '$hadoopHome'"
         exit 1
     }
@@ -230,7 +328,8 @@ try {
     $env:HADOOP_HOME = $hadoopHome
 
     $javaHome = [Environment]::GetEnvironmentVariable('JAVA_HOME', 'User')
-    if (-not [string]::IsNullOrWhiteSpace($javaHome)) {
+    if (-not [string]::IsNullOrWhiteSpace($javaHome))
+    {
         $env:JAVA_HOME = $javaHome
         Write-Info "Using JAVA_HOME from user environment: $javaHome"
     }
@@ -261,7 +360,6 @@ try {
 
     # Useful for Hadoop/YARN commands in the current process.
     $env:HADOOP_CONF_DIR = $hadoopConfDir
-    $env:YARN_CONF_DIR = $hadoopConfDir
 
     # --------------------------------------------------------------
     # Step 3: Copy Spark configuration file
@@ -278,24 +376,23 @@ try {
         -DestinationFileName 'spark-defaults.conf'
 
     # --------------------------------------------------------------
-    # Step 4: copy CASD python and r cluste mode scripts
+    # Step 4: copy CASD python and r cluste mode scripts to spark conf folder
     # --------------------------------------------------------------
     Write-Step 'Step 4: copy CASD python and r cluste mode scripts'
 
-    $sparkPyTarget = Copy-ClusterConfigFile `
-        -SourceFile $SparkPyConfSource `
-        -DestinationDir $sparkConfDir `
-        -DestinationFileName 'casd_spark.py'
+    if (-not (Test-Path -LiteralPath $sparkConfDir))
+    {
+        New-Item -ItemType Directory -Path $sparkConfDir -Force | Out-Null
+    }
 
-    $sparkRTarget = Copy-ClusterConfigFile `
-        -SourceFile $SparkRConfSource `
-        -DestinationDir $sparkConfDir `
-        -DestinationFileName 'casd_spark.R'
+    Copy-Item -Path $SparkCasdConfSource -Destination $sparkConfDir -Recurse -Force
+    $sparkCasdTarget = Join-Path $sparkConfDir $sparkCasdDirName
 
     # ----------------------------------------------------------
     # step 5: Hadoop command checks
     # ----------------------------------------------------------
-    if ($UseHadoopCommandChecks) {
+    if ($UseHadoopCommandChecks)
+    {
         Write-Step 'Optional Hadoop command checks'
 
         $hdfsCmd = Join-Path $hadoopHome 'bin\hdfs.cmd'
@@ -311,11 +408,13 @@ try {
             -CommandArgs @('node', '-list') `
             -Description 'yarn node -list'
 
-        if (-not $hdfsOk -or -not $yarnOk) {
+        if (-not $hdfsOk -or -not $yarnOk)
+        {
             Write-Warn 'One or more Hadoop command checks failed.'
             Write-Warn 'TCP connectivity may still be OK, but Hadoop commands may require JAVA_HOME, HADOOP_CONF_DIR, Kerberos tickets, or winutils.'
         }
-        else {
+        else
+        {
             Write-Ok 'Hadoop command checks succeeded.'
         }
     }
@@ -332,20 +431,20 @@ try {
     Write-Host "  hdfs-site.xml       = $hdfsSiteTarget"
     Write-Host "  yarn-site.xml       = $yarnSiteTarget"
     Write-Host "  spark-defaults.conf = $sparkDefaultsTarget"
-    Write-Host "  casd_spark.py = $sparkPyTarget"
-    Write-Host "  casd_spark.R = $sparkRTarget"
+    Write-Host "  casd_custom_conf = $sparkCasdTarget"
+
 
     Write-Host ''
     Write-Host 'Process environment used by this script:' -ForegroundColor Cyan
     Write-Host "  SPARK_HOME      = $env:SPARK_HOME"
     Write-Host "  HADOOP_HOME     = $env:HADOOP_HOME"
     Write-Host "  HADOOP_CONF_DIR = $env:HADOOP_CONF_DIR"
-    Write-Host "  YARN_CONF_DIR   = $env:YARN_CONF_DIR"
 
     Write-Host ''
     Write-Ok 'Hadoop and Spark cluster configuration setup finished successfully.'
 }
-catch {
+catch
+{
     Write-Err $_.Exception.Message
     exit 1
 }

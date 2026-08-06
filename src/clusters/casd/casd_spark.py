@@ -1,134 +1,148 @@
 import os
 import subprocess
 import tempfile
-import atexit
 import winreg
 from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Dict, Generator, Optional
+from pyspark.sql import SparkSession
 
-_REG = r"Software\CASD\Hadoop"
-_job_dt = None
+_REG_PATH: str = r"Software\CASD\Hadoop"
 
 
-def conf_registre():
-    """Lit la configuration deposee par install-tokens.ps1."""
+def get_registry_config(sub_key: str = _REG_PATH) -> Dict[str, str]:
+    """Reads Windows Registry values into a dictionary using a safe context manager."""
     try:
-        k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REG)
-    except OSError:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, sub_key) as key:
+            values: Dict[str, str] = {}
+            index = 0
+            while True:
+                try:
+                    name, val, _ = winreg.EnumValue(key, index)
+                    values[name] = str(val)
+                    index += 1
+                except OSError:
+                    break
+            return values
+    except OSError as err:
         raise RuntimeError(
-            "Configuration absente dans HKCU\\%s.\n"
-            "Executer install-tokens.ps1 avant d'utiliser ce module." % _REG
-        )
-    valeurs = {}
-    i = 0
-    while True:
-        try:
-            nom, val, _ = winreg.EnumValue(k, i)
-            valeurs[nom] = val
-            i += 1
-        except OSError:
-            break
-    winreg.CloseKey(k)
-    return valeurs
+            f"Configuration missing in HKCU\\{sub_key}.\n"
+            "Run install-tokens.ps1 before using this module."
+        ) from err
 
 
-def _token_session():
-    """Genere un token jetable propre a cette session Python."""
-    global _job_dt
-    cf = conf_registre()
-    dt = os.path.join(tempfile.gettempdir(), f"hadoop-py-{os.getpid()}.dt")
-    ps = os.path.join(cf["ToolsPath"], "refresh-tokens.ps1")
-    if not os.path.exists(ps):
-        raise FileNotFoundError(f"refresh-tokens.ps1 introuvable dans {cf['ToolsPath']}")
+class HadoopTokenManager:
+    """Manages the disposable Hadoop session token lifecycle safely."""
 
-    res = subprocess.run(
-        ["powershell", "-ExecutionPolicy", "Bypass", "-File", ps,
-         "-Out", dt, "-Quiet"],
-        capture_output=True, text=True
-    )
-    if not os.path.exists(dt):
-        raise RuntimeError(
-            "Echec de la generation du token.\n"
-            f"stdout: {res.stdout}\nstderr: {res.stderr}"
-        )
+    def __init__(self, config: Optional[Dict[str, str]] = None) -> None:
+        self.config = config or get_registry_config()
+        self.token_path: Optional[Path] = None
 
-    os.environ["HADOOP_TOKEN_FILE_LOCATION"] = dt
-    _job_dt = dt
-    print(f"Token Spark genere : {dt}")
-    return dt
+    def generate_token(self) -> Path:
+        """Generates a session token using PowerShell script."""
+        tools_path = Path(self.config.get("ToolsPath", ""))
+        ps_script = tools_path / "refresh-tokens.ps1"
+
+        if not ps_script.is_file():
+            raise FileNotFoundError(f"Script missing at: {ps_script}")
+
+        pid = os.getpid()
+        token_file = Path(tempfile.gettempdir()) / f"hadoop-py-{pid}.dt"
+
+        # Explicit powershell executable with -NoProfile for faster, clean execution
+        cmd = [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy", "Bypass",
+            "-File", str(ps_script),
+            "-Out", str(token_file),
+            "-Quiet"
+        ]
+
+        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+        if not token_file.is_file():
+            raise RuntimeError(
+                "Failed to generate session token.\n"
+                f"stdout: {res.stdout}\nstderr: {res.stderr}"
+            )
+
+        os.environ["HADOOP_TOKEN_FILE_LOCATION"] = str(token_file)
+        self.token_path = token_file
+        return token_file
+
+    def cleanup(self) -> None:
+        """Removes the generated token file and its accompanying .crc file."""
+        if self.token_path and self.token_path.exists():
+            crc_file = self.token_path.parent / f".{self.token_path.name}.crc"
+            for file_target in (self.token_path, crc_file):
+                try:
+                    file_target.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            self.token_path = None
+
+        os.environ.pop("HADOOP_TOKEN_FILE_LOCATION", None)
 
 
-def _cleanup():
-    """Supprime le token jetable de la session Python."""
-    global _job_dt
-    if _job_dt:
-        crc = os.path.join(os.path.dirname(_job_dt),
-                           "." + os.path.basename(_job_dt) + ".crc")
-        for f in (_job_dt, crc):
-            try:
-                os.remove(f)
-            except OSError:
-                pass
-        _job_dt = None
-    os.environ.pop("HADOOP_TOKEN_FILE_LOCATION", None)
+def get_spark(
+    conf: Optional[Dict[str, Any]] = None,
+    master: str = "yarn",
+    app_name: str = "python",
+    driver_port: Optional[int] = None,
+    token_manager: Optional[HadoopTokenManager] = None
+):
+    """Initializes and returns a SparkSession configured for the target environment."""
+    cfg = get_registry_config()
 
-
-atexit.register(_cleanup)
-
-
-def get_spark(conf=None, master="yarn", app_name="python", driver_port=None):
-    """
-    Ouvre une SparkSession configuree pour le cluster.
-
-    conf : dictionnaire de proprietes Spark choisies par l'utilisateur
-           (memoire, nombre d'executeurs, options applicatives).
-           Les cles de securite et de placement ci-dessous sont imposees
-           et ecrasent toute valeur fournie.
-    """
-    cf = conf_registre()
-
-    if cf.get("SparkHome"):
-        os.environ["SPARK_HOME"] = cf["SparkHome"]
-    if cf.get("HadoopConf"):
-        os.environ["HADOOP_CONF_DIR"] = cf["HadoopConf"]
+    if "SparkHome" in cfg:
+        os.environ["SPARK_HOME"] = cfg["SparkHome"]
+    if "HadoopConf" in cfg:
+        os.environ["HADOOP_CONF_DIR"] = cfg["HadoopConf"]
 
     if master == "yarn":
-        _token_session()
+        mgr = token_manager or HadoopTokenManager(cfg)
+        mgr.generate_token()
 
-    from pyspark.sql import SparkSession
-    b = SparkSession.builder.master(master).appName(app_name)
+    builder = SparkSession.builder.master(master).appName(app_name)
 
-    # configuration de l'utilisateur, appliquee en premier
-    for cle, val in (conf or {}).items():
-        b = b.config(cle, str(val))
+    # Apply user configurations first
+    if conf:
+        for key, value in conf.items():
+            builder = builder.config(key, str(value))
 
-    if driver_port is None:
-        driver_port = int(cf.get("DriverPort", 7077))
+    port = driver_port if driver_port is not None else int(cfg.get("DriverPort", 7077))
+    username = os.environ.get("USERNAME", "default")
+    staging_dir = Path(cfg.get("StagingDir", "/tmp")) / username
 
-    b = (b.config("spark.security.credentials.hadoopfs.enabled", "false")
-          .config("spark.security.credentials.hive.enabled", "false")
-          .config("spark.security.credentials.hbase.enabled", "false")
-          .config("spark.yarn.stagingDir",
-                  f"{cf['StagingDir']}/{os.environ.get('USERNAME','')}")
-          .config("spark.driver.port", str(driver_port))
-          .config("spark.driver.blockManager.port", str(driver_port + 200)))
-    # -----------------------------------------------------------------
+    builder = (
+        builder
+        .config("spark.security.credentials.hadoopfs.enabled", "false")
+        .config("spark.security.credentials.hive.enabled", "false")
+        .config("spark.security.credentials.hbase.enabled", "false")
+        .config("spark.yarn.stagingDir", staging_dir.as_posix())
+        .config("spark.driver.port", str(port))
+        .config("spark.driver.blockManager.port", str(port + 200))
+    )
 
-    return b.getOrCreate()
-
-
-def stop_spark(spark):
-    """Ferme la session et fait le menage."""
-    try:
-        spark.stop()
-    finally:
-        _cleanup()
+    return builder.getOrCreate()
 
 
 @contextmanager
-def spark_session(**kwargs):
-    """Gestionnaire de contexte : ferme et nettoie meme en cas d'erreur."""
-    spark = get_spark(**kwargs)
+def spark_session(
+    conf: Optional[Dict[str, Any]] = None,
+    **kwargs: Any
+) -> Generator[Any, None, None]:
+    """Context manager for SparkSession that ensures proper cleanup on termination."""
+    cfg = get_registry_config()
+    token_mgr = HadoopTokenManager(cfg) if kwargs.get("master", "yarn") == "yarn" else None
+
+    spark = get_spark(conf=conf, token_manager=token_mgr, **kwargs)
     try:
         yield spark
     finally:
-        stop_spark(spark)
+        try:
+            spark.stop()
+        finally:
+            if token_mgr:
+                token_mgr.cleanup()

@@ -1,31 +1,4 @@
-<#
-.SYNOPSIS
-    Multi-User Windows Server - Local Apache Spark Installation & Isolation Script.
 
-.DESCRIPTION
-    1. This script scans local zip packages for JDK, Hadoop, and Spark.
-    2. Validates spark installation required dependencies, and offers user a choice to select which spark version to install
-    3. If user choose a version which is different from the current spark version, it cleans previous spark installations, and
-       user environment variables.
-    4. After clean, start a new fresh spark installation: install binary, add user enviroment variables
-    It asks the user which Spark version to install, validates required
-    JDK/Hadoop zip packages, removes a previous managed installation,
-    cleans user environment variables, installs the selected Spark version
-    and dependencies, then configures user environment variables.
-
-.NOTES
-    Expected source zip names:
-        jdk-<version>.zip e.g. jdk-17.0.18.zip
-        hadoop-<version>.zip e.g. hadoop-3.4.3.zip the hadoop.zip is provided by DS team, the share/doc has been removed
-        spark-<version>.zip e.g. spark-4.1.3.zip
-
-    The script installs into a managed directory, by default:
-        C:\Users\pliu\Documents\tools\installed
-
-    It only removes managed directories under that install root by default.
-#>
-
-# Script Configuration
 [CmdletBinding()]
 param(
     [string]$_toolsSrcDir,
@@ -34,12 +7,8 @@ param(
     [string]$_sparkSrcDir,
     [string]$InstallRoot,
 
-    # If specified, also removes user JAVA_HOME/HADOOP_HOME even if they
-    # do not point under $InstallRoot.
     [switch]$CleanAllRelatedUserVariables,
 
-    # If null or empty, interactive Spark selection is used.
-    # If valid, example: 3.5.7 or 4.1.3, skip interactive Spark selection.
     [AllowNull()]
     [AllowEmptyString()]
     [string]$TargetSparkVersion = $null
@@ -48,9 +17,6 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-# ------------------------------------------------------------------
-# Determine default source file paths
-# ------------------------------------------------------------------
 if ([string]::IsNullOrWhiteSpace($_toolsSrcDir)) {
     $_toolsSrcDir = Join-Path $PSScriptRoot 'tools'
 }
@@ -71,20 +37,6 @@ if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
     $InstallRoot = Join-Path $env:LOCALAPPDATA 'installed-spark'
 }
 
-# ------------------------------------------------------------------
-# Dependency rules
-# ------------------------------------------------------------------
-# Edit this map if your required JDK/Hadoop combinations are different.
-#
-# HadoopVersionPrefixes uses prefix matching:
-#   '3.3' matches 3.3.6
-#   '3.4' matches 3.4.3
-#
-# JavaMajorVersions matches the JDK major version:
-#   jdk-11.0.30.zip -> major version 11
-#   jdk-17.0.18.zip -> major version 17
-#   jdk-21.0.10.zip -> major version 21
-# ------------------------------------------------------------------
 $SparkDependencyMap = @{
     '3.5.9' = @{
         JavaMajorVersions = @('11'); HadoopVersionPrefixes = @('3.3')
@@ -108,9 +60,6 @@ $SparkDependencyMap = @{
     }
 }
 
-# ------------------------------------------------------------------
-# Console helpers
-# ------------------------------------------------------------------
 function Write-Info
 {
     param([string]$Message)
@@ -140,9 +89,7 @@ function Write-Step
     param([string]$Message)
     Write-Host "`n==> $Message" -ForegroundColor Magenta
 }
-# ------------------------------------------------------------------
-# get 7zip path helpers
-# ------------------------------------------------------------------
+
 function Get-SevenZipPath
 {
     $commands = @('7z.exe', '7za.exe')
@@ -161,9 +108,6 @@ function Get-SevenZipPath
     return $null
 }
 
-# ------------------------------------------------------------------
-# Version helpers
-# ------------------------------------------------------------------
 function ConvertTo-ComparableVersion
 {
     param([string]$Version)
@@ -216,9 +160,6 @@ function Test-PathPrefix {
     )
 }
 
-# ------------------------------------------------------------------
-# Package discovery
-# ------------------------------------------------------------------
 function Get-ZipPackages
 {
     param(
@@ -353,9 +294,6 @@ function Select-EligibleHadoop
     return $eligible[0]
 }
 
-# ------------------------------------------------------------------
-# Interactive helpers
-# ------------------------------------------------------------------
 function Select-SparkPackage
 {
     param($SparkPackages)
@@ -429,9 +367,6 @@ function Confirm-Choice
     }
 }
 
-# ------------------------------------------------------------------
-# Installed Spark detection
-# ------------------------------------------------------------------
 function Test-SparkHome
 {
     param([string]$Path)
@@ -529,9 +464,6 @@ function Get-InstalledSpark
     )[0]
 }
 
-# ------------------------------------------------------------------
-# Environment helpers
-# ------------------------------------------------------------------
 function Backup-UserEnvironment
 {
     param([string]$InstallRoot)
@@ -784,9 +716,6 @@ function Remove-ManagedEnvironmentVariables
     }
 }
 
-# ------------------------------------------------------------------
-# Cleanup helpers
-# ------------------------------------------------------------------
 function Remove-ManagedInstallations
 {
     param([string]$InstallRoot)
@@ -810,9 +739,6 @@ function Remove-ManagedInstallations
     }
 }
 
-# ------------------------------------------------------------------
-# Installation helper (unzip the source file to the target folder)
-# ------------------------------------------------------------------
 function Expand-ZipToManagedFolder
 {
     param(
@@ -838,20 +764,17 @@ function Expand-ZipToManagedFolder
         $separatorChar = [System.IO.Path]::DirectorySeparatorChar
         $separator = [string]$separatorChar
 
-        # --------------------------------------------------------------
-        # 1) Try built-in tar.exe
-        # --------------------------------------------------------------
         $tar = Get-Command tar.exe -ErrorAction SilentlyContinue
 
         if ($tar)
         {
+            Write-Info "Extracting with tar.exe: $( $tar.Source )"
 
             & $tar.Source -xf $ZipPath -C $tempDir
 
             if ($LASTEXITCODE -eq 0 -and @(Get-ChildItem -LiteralPath $tempDir -Force).Count -gt 0)
             {
                 $extracted = $true
-                Write-Info "Extracting $ZipPath to $DestinationRoot"
                 Write-Ok 'Extraction succeeded using tar.exe.'
             }
             else
@@ -863,9 +786,6 @@ function Expand-ZipToManagedFolder
             }
         }
 
-        # --------------------------------------------------------------
-        # 2) Try 7-Zip if available
-        # --------------------------------------------------------------
         if (-not $extracted)
         {
             $sevenZip = Get-SevenZipPath
@@ -891,11 +811,6 @@ function Expand-ZipToManagedFolder
             }
         }
 
-        # --------------------------------------------------------------
-        # 3) Try .NET ZipArchive
-        #    This manually skips directory-only entries, which helps with
-        #    zip files that contain empty folder entries.
-        # --------------------------------------------------------------
         if (-not $extracted)
         {
             try
@@ -985,9 +900,6 @@ function Expand-ZipToManagedFolder
             }
         }
 
-        # --------------------------------------------------------------
-        # 4) Last resort: Expand-Archive
-        # --------------------------------------------------------------
         if (-not $extracted)
         {
             Write-Info 'Extracting with Expand-Archive as last resort.'
@@ -1005,9 +917,6 @@ function Expand-ZipToManagedFolder
             }
         }
 
-        # --------------------------------------------------------------
-        # Normalize extracted folder layout
-        # --------------------------------------------------------------
         $items = @(Get-ChildItem -LiteralPath $tempDir -Force)
         $sourceDir = $null
 
@@ -1058,9 +967,6 @@ function Expand-ZipToManagedFolder
     }
 }
 
-# ------------------------------------------------------------------
-# Main script
-# ------------------------------------------------------------------
 Write-Step 'Step 1: Detect local source packages'
 
 Write-Info "Java source directory   : $_javaSrcDir"
@@ -1095,9 +1001,6 @@ if ($sparkPackages.Count -eq 0)
     exit 1
 }
 
-# ------------------------------------------------------------------
-# Step 2: Select Spark version
-# ------------------------------------------------------------------
 Write-Step 'Step 2: Select Spark version'
 
 $selectedSpark = $null
@@ -1192,9 +1095,6 @@ if ($missing.Count -gt 0)
 Write-Info ("Selected JDK    : {0} ({1})" -f $selectedJava.Version, $selectedJava.Name)
 Write-Info ("Selected Hadoop : {0} ({1})" -f $selectedHadoop.Version, $selectedHadoop.Name)
 
-# ------------------------------------------------------------------
-# Step 3: Detect existing Spark installation
-# ------------------------------------------------------------------
 Write-Step 'Step 3: Check existing Spark installation'
 
 $installedSpark = Get-InstalledSpark -InstallRoot $InstallRoot
@@ -1246,16 +1146,12 @@ if ($installedSpark)
     }
 }
 
-# Capture old user environment values before cleaning.
 $oldJavaHome = [Environment]::GetEnvironmentVariable('JAVA_HOME', 'User')
 $oldHadoopHome = [Environment]::GetEnvironmentVariable('HADOOP_HOME', 'User')
 $oldSparkHome = [Environment]::GetEnvironmentVariable('SPARK_HOME', 'User')
 
 try
 {
-    # ------------------------------------------------------------------
-    # Step 4a: Clean previous installation and user environment
-    # ------------------------------------------------------------------
     Write-Step 'Step 4a: Remove previous installation and clean user environment'
 
     Backup-UserEnvironment -InstallRoot $InstallRoot
@@ -1291,7 +1187,6 @@ try
         }
     }
 
-    # Remove old dependency directories if they are under managed InstallRoot.
     foreach ($oldDir in @($oldJavaHome, $oldHadoopHome))
     {
         if ($oldDir -and (Test-PathPrefix -Path $oldDir -Prefix $InstallRoot))
@@ -1301,18 +1196,14 @@ try
         }
     }
 
-    # Remove any remaining managed spark/jdk/hadoop directories.
     Remove-ManagedInstallations -InstallRoot $InstallRoot
 
-    # Remove environment variables.
     Remove-ManagedEnvironmentVariables `
         -InstallRoot $InstallRoot `
         -CleanAll:$CleanAllRelatedUserVariables
 
-    # Remove PATH entries under managed install root.
     Remove-PathVariablePrefix -Prefix $InstallRoot
 
-    # Also remove common variable-based PATH entries and old bin entries.
     $exactPathRemovals = @(
         '%JAVA_HOME%\bin',
         '%HADOOP_HOME%\bin',
@@ -1448,7 +1339,6 @@ try
         }
     }
 
-    # Final filter: remove null/empty values before calling Remove-PathVariableExact.
     $exactPathRemovals = @(
     $exactPathRemovals | Where-Object {
         -not [string]::IsNullOrWhiteSpace($_)
@@ -1468,9 +1358,6 @@ try
 
     Write-Ok 'Previous managed installation and related user environment cleaned.'
 
-    # ------------------------------------------------------------------
-    # Step 4b: Install selected Spark, JDK, and Hadoop
-    # ------------------------------------------------------------------
     Write-Step 'Step 4b: Install selected Spark version and dependencies'
 
     $javaHome = Expand-ZipToManagedFolder `
@@ -1488,7 +1375,6 @@ try
         -DestinationRoot $InstallRoot `
         -TargetFolderName ("spark-{0}" -f $selectedSpark.Version)
 
-    # Basic sanity checks.
     $javaExe = Join-Path (Join-Path $javaHome 'bin') 'java.exe'
     if (-not (Test-Path -LiteralPath $javaExe))
     {
@@ -1503,9 +1389,6 @@ try
         throw "spark-submit was not found under '$sparkHome'. The Spark zip layout may be unexpected."
     }
 
-    # ------------------------------------------------------------------
-    # Step 4c: Set user environment variables
-    # ------------------------------------------------------------------
     Write-Step 'Step 4c: Configure user environment variables'
 
     # set hadoop conf dir for spark cluster mode
