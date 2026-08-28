@@ -1,28 +1,44 @@
 <#
 .SYNOPSIS
-    Configures Hadoop and Spark for cluster mode and checks cluster reachability.
+    This script installs the required Hadoop and Spark configuration files so the HDFS, YARN, and Spark client
+    can connect to a remote HDFS, Spark, YARN cluster. It also installs the required files for Hadoop cluster
+    authentication token management.
 
 .DESCRIPTION
-    This script:
-      1. Checks user environment variables SPARK_HOME and HADOOP_HOME.
-      2. Copies custom Hadoop config files to HADOOP_HOME\etc\hadoop.
-      3. Copies custom Spark config file to SPARK_HOME\conf.
-      4. Checks whether the cluster endpoints are reachable.
+    This script follows the below steps:
+      0. Pre-flight check: Verifies all expected source configuration files exist. If any file is missing,
+         it stops immediately and shows an error message.
+      1. Checks user/machine environment variables HADOOP_HOME and SPARK_HOME. If they exist, continues to step 2.
+         If not, stops and asks the user to run `install_spark.ps1`.
+      2. Checks if HADOOP_CONF_DIR environment variable exists. If it does, copies custom Hadoop config files
+         there. If not, creates the environment variable HADOOP_CONF_DIR with value HADOOP_HOME\etc\hadoop,
+         then copies custom Hadoop config files to it.
+      3. Copies custom Spark configuration files to SPARK_HOME\conf.
+      4. Copies CASD cluster mode scripts and token management files to SPARK_HOME\conf\casd.
+      5. (Optional) Checks whether the cluster endpoints are reachable via Hadoop commands.
 
-    Expected custom config files by default:
-      core-site.xml
-      hdfs-site.xml
-      yarn-site.xml
-      spark-defaults.conf
+    Expected Hadoop config files:
+     - core-site.xml
+     - hdfs-site.xml
+     - yarn-site.xml
+    Expected Spark config files:
+     - spark-defaults.conf
+     - log4j2.properties (optional, handled via folder copy if present)
+    Expected token management files (inside casd-token-manager folder):
+     - install-tokens.ps1
+     - refresh-token.ps1
+     - casd_spark.py
+     - casd_spark.R
+     - make-creds-file-1.0.0-SNAPSHOT.jar
 
 .NOTES
-    This script only reads user environment variables.
+    This script only copies custom configuration files to Hadoop and Spark folders.
     It does not install Spark or Hadoop.
 #>
 
 [CmdletBinding()]
 param(
-# Directory containing your custom configuration files.
+    # Directory containing your custom configuration files.
     [string]$ConfigSourceDir,
 
 # Individual source files. If empty, they default to files under ConfigSourceDir.

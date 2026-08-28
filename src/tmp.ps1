@@ -1,485 +1,472 @@
 <#
 .SYNOPSIS
-    Multi-User Windows Server - Local Apache Spark Installation & Isolation Script.
+    This script installs the required Hadoop and Spark configuration files so the HDFS, YARN, and Spark client
+    can connect to a remote HDFS, Spark, YARN cluster. It also installs the required files for Hadoop cluster
+    authentication token management.
 
 .DESCRIPTION
-    Scans local zip packages for JDK, Hadoop, and Spark.
-    Validates required dependencies, cleans previous user-level installations,
-    extracts binaries to space-free managed directories, and configures isolated
-    User environment variables ([EnvironmentVariableTarget]::User).
+    This script follows the below steps:
+      0. Pre-flight check: Verifies all expected source configuration files exist. If any file is missing,
+         it stops immediately and shows an error message.
+      1. Checks user/machine environment variables HADOOP_HOME and SPARK_HOME. If they exist, continues to step 2.
+         If not, stops and asks the user to run `install_spark.ps1`.
+      2. Checks if HADOOP_CONF_DIR environment variable exists. If it does, copies custom Hadoop config files
+         there. If not, creates the environment variable HADOOP_CONF_DIR with value HADOOP_HOME\etc\hadoop,
+         then copies custom Hadoop config files to it.
+      3. Copies custom Spark configuration files to SPARK_HOME\conf.
+      4. Copies CASD cluster mode scripts and token management files to SPARK_HOME\conf\casd.
+      5. (Optional) Checks whether the cluster endpoints are reachable via Hadoop commands.
+
+    Expected Hadoop config files:
+     - core-site.xml
+     - hdfs-site.xml
+     - yarn-site.xml
+    Expected Spark config files:
+     - spark-defaults.conf
+     - log4j2.properties (optional, handled via folder copy if present)
+    Expected token management files (inside CASD folder):
+     - install-tokens.ps1
+     - refresh-token.ps1
+     - casd_spark.py
+     - casd_spark.R
+     - make-creds-file-1.0.0-SNAPSHOT.jar
 
 .NOTES
-    Expected source zip names:
-        jdk-<version>.zip
-        hadoop-<version>.zip
-        spark-<version>.zip
-
-    Default managed root:
-        $HOME\Tools\Installed
+    This script only copies custom configuration files to Hadoop and Spark folders.
+    It does not install Spark or Hadoop.
 #>
 
 [CmdletBinding()]
 param(
-    [string]$_javaSrcDir   = "$HOME\Tools\java",
-    [string]$_hadoopSrcDir = "$HOME\Tools\hadoop",
-    [string]$_sparkSrcDir  = "$HOME\Tools\spark",
-    [string]$InstallRoot   = "$HOME\Tools\installed",
+    # Directory containing your custom configuration files.
+    [string]$ConfigSourceDir,
 
-    # If specified, also removes user JAVA_HOME/HADOOP_HOME even if they
-    # do not point under $InstallRoot.
-    [switch]$CleanAllRelatedUserVariables,
+    # Individual source files. If empty, they default to files under ConfigSourceDir.
+    [string]$CoreSiteXmlSource,
+    [string]$HdfsSiteXmlSource,
+    [string]$YarnSiteXmlSource,
+    [string]$SparkDefaultsConfSource,
+    [string]$SparkCasdConfSource,
+    [string]$sparkCasdDirName = "casd",
 
-    # If null or empty, interactive Spark selection is used.
-    # If valid, example: 3.5.9 or 4.1.2, skip interactive Spark selection.
-    [AllowNull()]
-    [AllowEmptyString()]
-    [string]$TargetSparkVersion = $null
+    # Optionally run hdfs/yarn command checks after TCP checks.
+    [switch]$UseHadoopCommandChecks
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 # ------------------------------------------------------------------
-# Dependency Map (Spark -> Java / Hadoop)
+# Default source file paths
 # ------------------------------------------------------------------
-$SparkDependencyMap = @{
-    '3.5.9' = @{ JavaMajorVersions = @('11');      HadoopVersionPrefixes = @('3.3') }
-    '4.1.2' = @{ JavaMajorVersions = @('17');      HadoopVersionPrefixes = @('3.4') }
-    '4.2.0' = @{ JavaMajorVersions = @('17', '21'); HadoopVersionPrefixes = @('3.5') }
+if ([string]::IsNullOrWhiteSpace($ConfigSourceDir)) {
+    $ConfigSourceDir = Join-Path $PSScriptRoot 'clusters'
+}
 
-    # Fallback Rules
-    '3.5'   = @{ JavaMajorVersions = @('11');      HadoopVersionPrefixes = @('3.3') }
-    '4'     = @{ JavaMajorVersions = @('17');      HadoopVersionPrefixes = @('3.4') }
-    '3'     = @{ JavaMajorVersions = @('11', '17'); HadoopVersionPrefixes = @('3.3') }
+if ([string]::IsNullOrWhiteSpace($CoreSiteXmlSource)) {
+    $CoreSiteXmlSource = Join-Path $ConfigSourceDir 'core-site.xml'
+}
+
+if ([string]::IsNullOrWhiteSpace($HdfsSiteXmlSource)) {
+    $HdfsSiteXmlSource = Join-Path $ConfigSourceDir 'hdfs-site.xml'
+}
+
+if ([string]::IsNullOrWhiteSpace($YarnSiteXmlSource)) {
+    $YarnSiteXmlSource = Join-Path $ConfigSourceDir 'yarn-site.xml'
+}
+
+if ([string]::IsNullOrWhiteSpace($SparkDefaultsConfSource)) {
+    $SparkDefaultsConfSource = Join-Path $ConfigSourceDir 'spark-defaults.conf'
+}
+
+if ([string]::IsNullOrWhiteSpace($SparkCasdConfSource)) {
+    $SparkCasdConfSource = Join-Path $ConfigSourceDir $sparkCasdDirName
 }
 
 # ------------------------------------------------------------------
-# Console Logging Helpers
+# Console helpers
 # ------------------------------------------------------------------
-function Write-Info { param([string]$Message) Write-Host "[INFO]  $Message" -ForegroundColor Cyan }
-function Write-Ok   { param([string]$Message) Write-Host "[OK]    $Message" -ForegroundColor Green }
-function Write-Warn { param([string]$Message) Write-Host "[WARN]  $Message" -ForegroundColor Yellow }
-function Write-Err  { param([string]$Message) Write-Host "[ERROR] $Message" -ForegroundColor Red }
-function Write-Step { param([string]$Message) Write-Host "`n==> $Message" -ForegroundColor Magenta }
+function Write-Info {
+    param([string]$Message)
+    Write-Host "[INFO] $Message" -ForegroundColor Cyan
+}
+
+function Write-Ok {
+    param([string]$Message)
+    Write-Host "[OK] $Message" -ForegroundColor Green
+}
+
+function Write-Warn {
+    param([string]$Message)
+    Write-Host "[WARN] $Message" -ForegroundColor Yellow
+}
+
+function Write-Err {
+    param([string]$Message)
+    Write-Host "[ERROR] $Message" -ForegroundColor Red
+}
+
+function Write-Step {
+    param([string]$Message)
+    Write-Host "`n==> $Message" -ForegroundColor Magenta
+}
 
 # ------------------------------------------------------------------
-# Version Helpers
+# Config file copy helper
 # ------------------------------------------------------------------
-function ConvertTo-ComparableVersion {
-    param([string]$Version)
+function Copy-ClusterConfigFile {
+    param(
+        [string]$SourceFile,
+        [string]$DestinationDir,
+        [string]$DestinationFileName
+    )
 
-    if ([string]::IsNullOrWhiteSpace($Version)) {
-        return [Version]::new(0, 0, 0, 0)
+    if ([string]::IsNullOrWhiteSpace($SourceFile)) {
+        throw 'Configuration source file path is empty.'
     }
 
-    $parts = @($Version -split '\.' | ForEach-Object { [int]$_ })
+    if (-not (Test-Path -LiteralPath $SourceFile -PathType Leaf)) {
+        throw "Required configuration file not found: '$SourceFile'"
+    }
 
-    if ($parts.Count -gt 4) { $parts = $parts[0..3] }
-    while ($parts.Count -lt 4) { $parts += 0 }
+    if (-not (Test-Path -LiteralPath $DestinationDir)) {
+        Write-Info "Creating directory: $DestinationDir"
+        New-Item -ItemType Directory -Path $DestinationDir -Force | Out-Null
+    }
 
-    return [Version]::new($parts[0], $parts[1], $parts[2], $parts[3])
+    $destinationFile = Join-Path $DestinationDir $DestinationFileName
+
+    # If source and destination are the same file, do nothing.
+    try {
+        $sourceResolved = (Get-Item -LiteralPath $SourceFile -ErrorAction Stop).FullName
+        if ((Test-Path -LiteralPath $destinationFile) -and
+                ((Get-Item -LiteralPath $destinationFile -ErrorAction Stop).FullName -eq $sourceResolved)) {
+            Write-Info "Source and destination are the same file: $destinationFile"
+            return $destinationFile
+        }
+    }
+    catch {
+        # Ignore resolution issues and continue.
+    }
+
+    # Backup existing destination file.
+    if (Test-Path -LiteralPath $destinationFile) {
+        $timestamp = Get-Date -Format 'yyyyMMddHHmmss'
+        $backupFile = "{0}.backup.{1}" -f $destinationFile, $timestamp
+
+        Write-Info "Backing up existing file: $destinationFile"
+        Copy-Item -LiteralPath $destinationFile -Destination $backupFile -Force
+        Write-Info "Backup created: $backupFile"
+    }
+
+    Copy-Item -LiteralPath $SourceFile -Destination $destinationFile -Force
+    Write-Ok "Copied '$SourceFile' to '$destinationFile'"
+
+    return $destinationFile
 }
 
-function Test-VersionPrefix {
-    param([string]$Version, [string]$Prefix)
-    return ($Version -eq $Prefix) -or ($Version.StartsWith("$Prefix."))
+# ------------------------------------------------------------------
+# Config folder copy helper
+# ------------------------------------------------------------------
+function Copy-CustomConfFolder {
+    param(
+        [string]$SourceDir,
+        [string]$DestinationDir
+    )
+
+    if (-not (Test-Path -LiteralPath $SourceDir -PathType Container)) {
+        throw "Custom configuration folder not found: '$SourceDir'"
+    }
+
+    if (-not (Test-Path -LiteralPath $DestinationDir)) {
+        Write-Info "Creating directory: $DestinationDir"
+        New-Item -ItemType Directory -Path $DestinationDir -Force | Out-Null
+    }
+
+    $files = @(Get-ChildItem -LiteralPath $SourceDir -Recurse -File -Force)
+
+    if ($files.Count -eq 0) {
+        Write-Warn "Custom configuration folder is empty: '$SourceDir'"
+        return @()
+    }
+
+    $sourceRoot = $SourceDir.TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+    $separator = [System.IO.Path]::DirectorySeparatorChar
+    $copiedFiles = @()
+
+    foreach ($file in $files) {
+        $relativePath = $file.FullName.Substring($sourceRoot.Length).TrimStart($separator)
+        $targetFile = Join-Path $DestinationDir $relativePath
+        $targetDir = Split-Path $targetFile -Parent
+
+        if (-not (Test-Path -LiteralPath $targetDir)) {
+            Write-Info "Creating directory: $targetDir"
+            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+        }
+
+        if (Test-Path -LiteralPath $targetFile) {
+            $timestamp = Get-Date -Format 'yyyyMMddHHmmss'
+            $backupFile = "{0}.backup.{1}" -f $targetFile, $timestamp
+
+            Write-Info "Backing up existing file: $targetFile"
+            Copy-Item -LiteralPath $targetFile -Destination $backupFile -Force
+            Write-Info "Backup created: $backupFile"
+        }
+
+        Copy-Item -LiteralPath $file.FullName -Destination $targetFile -Force
+        Write-Ok "Copied '$($file.Name)' to '$targetFile'"
+
+        $copiedFiles += $targetFile
+    }
+
+    return $copiedFiles
 }
 
-function Test-PathPrefix {
-    param([string]$Path, [string]$Prefix)
+# ------------------------------------------------------------------
+# Optional Hadoop command check helper
+# ------------------------------------------------------------------
+function Test-HadoopCommand {
+    param(
+        [string]$CommandPath,
+        [string[]]$CommandArgs,
+        [string]$Description
+    )
 
-    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Prefix)) {
+    if (-not (Test-Path -LiteralPath $CommandPath -PathType Leaf)) {
+        Write-Warn "Command not found: '$CommandPath'. Skipping $Description."
         return $false
     }
 
-    $normalizedPath   = $Path.TrimEnd('\')
-    $normalizedPrefix = $Prefix.TrimEnd('\')
-
-    return (
-        $normalizedPath.Equals($normalizedPrefix, [StringComparison]::OrdinalIgnoreCase) -or
-        $normalizedPath.StartsWith("$normalizedPrefix\", [StringComparison]::OrdinalIgnoreCase)
-    )
-}
-
-# ------------------------------------------------------------------
-# Package Discovery
-# ------------------------------------------------------------------
-function Get-ZipPackages {
-    param([string]$Path, [string]$Prefix)
-
-    $packages = @()
-    if (-not (Test-Path -LiteralPath $Path)) { return $packages }
-
-    $pattern = "^{0}-(?<version>\d+(?:\.\d+)*)\.zip$" -f [regex]::Escape($Prefix)
-
-    Get-ChildItem -LiteralPath $Path -File -Filter "$Prefix-*.zip" -ErrorAction SilentlyContinue |
-        ForEach-Object {
-            if ($_.Name -match $pattern) {
-                $version = $Matches.version
-                $parts   = $version -split '\.'
-                $major   = $parts[0]
-                $majorMinor = if ($parts.Count -ge 2) { "$($parts[0]).$($parts[1])" } else { $major }
-
-                $packages += [PSCustomObject]@{
-                    Name       = $_.Name
-                    FullPath   = $_.FullName
-                    Version    = $version
-                    Major      = $major
-                    MajorMinor = $majorMinor
-                }
-            }
-        }
-
-    return @(
-        $packages | Sort-Object -Property @{
-            Expression = { ConvertTo-ComparableVersion $_.Version }; Descending = $true
-        }
-    )
-}
-
-function Get-SparkDependencyRule {
-    param([string]$SparkVersion)
-
-    $parts = $SparkVersion -split '\.'
-    $major = $parts[0]
-    $majorMinor = if ($parts.Count -ge 2) { "$($parts[0]).$($parts[1])" } else { $major }
-
-    foreach ($key in @($SparkVersion, $majorMinor, $major)) {
-        if ($SparkDependencyMap.ContainsKey($key)) {
-            return $SparkDependencyMap[$key]
-        }
-    }
-    return $null
-}
-
-function Select-EligibleJava {
-    param($JavaPackages, [string[]]$RequiredMajors)
-
-    $eligible = @(
-        $JavaPackages |
-            Where-Object { $RequiredMajors -contains $_.Major } |
-            Sort-Object -Property @{ Expression = { ConvertTo-ComparableVersion $_.Version }; Descending = $true }
-    )
-
-    if ($eligible.Count -eq 0) { return $null }
-    return $eligible[0]
-}
-
-function Select-EligibleHadoop {
-    param($HadoopPackages, [string[]]$RequiredPrefixes)
-
-    $eligible = @(
-        $HadoopPackages |
-            Where-Object {
-                $pkg = $_
-                @($RequiredPrefixes | Where-Object { Test-VersionPrefix -Version $pkg.Version -Prefix $_ }).Count -gt 0
-            } |
-            Sort-Object -Property @{ Expression = { ConvertTo-ComparableVersion $_.Version }; Descending = $true }
-    )
-
-    if ($eligible.Count -eq 0) { return $null }
-    return $eligible[0]
-}
-
-# ------------------------------------------------------------------
-# Interactive Helpers
-# ------------------------------------------------------------------
-function Select-SparkPackage {
-    param($SparkPackages)
-
-    $packages = @($SparkPackages)
-    Write-Host "`nAvailable Spark versions:" -ForegroundColor Cyan
-
-    for ($i = 0; $i -lt $packages.Count; $i++) {
-        Write-Host ("  [{0}] {1} ({2})" -f ($i + 1), $packages[$i].Version, $packages[$i].Name)
-    }
-    Write-Host '  [0] Exit'
-
-    while ($true) {
-        $choice = Read-Host 'Select a Spark version to install'
-        if ($choice -eq '0') { return $null }
-
-        $index = 0
-        if ([int]::TryParse($choice, [ref]$index) -and $index -ge 1 -and $index -le $packages.Count) {
-            return $packages[$index - 1]
-        }
-        Write-Warn 'Invalid selection. Enter a number from the list.'
-    }
-}
-
-# ------------------------------------------------------------------
-# Environment Helpers
-# ------------------------------------------------------------------
-function Backup-UserEnvironment {
-    param([string]$InstallRoot)
-
-    $backupDir = Join-Path $InstallRoot 'env-backups'
-    New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
-
-    $fileName  = "user-env-{0}.txt" -f (Get-Date -Format 'yyyyMMdd-HHmmss')
-    $backupFile = Join-Path $backupDir $fileName
-
-    $lines = [Environment]::GetEnvironmentVariables([EnvironmentVariableTarget]::User).GetEnumerator() |
-        ForEach-Object { "{0}={1}" -f $_.Key, $_.Value } | Sort-Object
-
-    $lines | Set-Content -LiteralPath $backupFile -Encoding UTF8
-    Write-Info "User environment backed up to: $backupFile"
-}
-
-function Refresh-ProcessPath {
-    $machinePath = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
-    $userPath    = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
-
-    $all = @()
-    if ($machinePath) { $all += @($machinePath -split ';' | Where-Object { $_ }) }
-    if ($userPath)    { $all += @($userPath -split ';' | Where-Object { $_ }) }
-
-    $env:Path = ($all -join ';')
-}
-
-function Set-UserEnvironmentVariable {
-    param([string]$Name, [string]$Value)
-
-    [Environment]::SetEnvironmentVariable($Name, $Value, [EnvironmentVariableTarget]::User)
-    [Environment]::SetEnvironmentVariable($Name, $Value, [EnvironmentVariableTarget]::Process)
-}
-
-function Remove-UserEnvironmentVariable {
-    param([string]$Name)
+    Write-Info "Running: $CommandPath $( $CommandArgs -join ' ' )"
 
     try {
-        [Environment]::SetEnvironmentVariable($Name, $null, [EnvironmentVariableTarget]::User)
-        [Environment]::SetEnvironmentVariable($Name, $null, [EnvironmentVariableTarget]::Process)
-    }
-    catch {
-        Write-Warn "Could not remove environment variable '$Name': $($_.Exception.Message)"
-    }
-}
+        & $CommandPath @CommandArgs | Out-Null
 
-function Add-UserPathVariable {
-    param([string[]]$Paths)
-
-    $userPath = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
-    $entries  = @()
-    if ($userPath) { $entries = @($userPath -split ';' | Where-Object { $_ }) }
-
-    $normalizedNewPaths = @($Paths | ForEach-Object { $_.TrimEnd('\') })
-
-    # Remove duplicates
-    $entries = @($entries | Where-Object { $normalizedNewPaths -notcontains $_.TrimEnd('\') })
-
-    # Prepend new paths
-    $entries = @($normalizedNewPaths + $entries)
-
-    $newPath = ($entries -join ';')
-    [Environment]::SetEnvironmentVariable('Path', $newPath, [EnvironmentVariableTarget]::User)
-
-    Refresh-ProcessPath
-}
-
-function Remove-ManagedEnvironmentVariables {
-    param([string]$InstallRoot, [switch]$CleanAll)
-
-    try {
-        $sparkHome = [Environment]::GetEnvironmentVariable('SPARK_HOME', [EnvironmentVariableTarget]::User)
-
-        if ([string]::IsNullOrWhiteSpace($sparkHome)) {
-            Write-Info 'User SPARK_HOME is not set. Skipping SPARK_HOME removal.'
+        if ($LASTEXITCODE -eq 0) {
+            Write-Ok "$Description succeeded."
+            return $true
         }
         else {
-            Remove-UserEnvironmentVariable -Name 'SPARK_HOME'
-            Write-Info 'Removed user SPARK_HOME.'
-        }
-
-        foreach ($name in @('JAVA_HOME', 'HADOOP_HOME')) {
-            $value = [Environment]::GetEnvironmentVariable($name, [EnvironmentVariableTarget]::User)
-
-            if ([string]::IsNullOrWhiteSpace($value)) {
-                Write-Info "User $name is not set. Skipping removal."
-                continue
-            }
-
-            if ($CleanAll -or (Test-PathPrefix -Path $value -Prefix $InstallRoot)) {
-                Remove-UserEnvironmentVariable -Name $name
-                Write-Info "Removed user $name."
-            }
+            Write-Warn "$Description failed with exit code $LASTEXITCODE."
+            return $false
         }
     }
     catch {
-        Write-Warn "Could not clean managed environment variables: $($_.Exception.Message)"
+        Write-Warn "$Description failed: $( $_.Exception.Message )"
+        return $false
     }
 }
 
 # ------------------------------------------------------------------
-# Extraction Helper
+# Main script
 # ------------------------------------------------------------------
-function Expand-ZipToManagedFolder {
-    param(
-        [string]$ZipPath,
-        [string]$DestinationRoot,
-        [string]$TargetFolderName
+try {
+    # --------------------------------------------------------------
+    # Step 0: Pre-flight check for all source configuration files
+    # --------------------------------------------------------------
+    Write-Step 'Step 0: Pre-flight check for source configuration files'
+
+    $requiredSources = @(
+        @{ Path = $CoreSiteXmlSource; Name = 'core-site.xml' },
+        @{ Path = $HdfsSiteXmlSource; Name = 'hdfs-site.xml' },
+        @{ Path = $YarnSiteXmlSource; Name = 'yarn-site.xml' },
+        @{ Path = $SparkDefaultsConfSource; Name = 'spark-defaults.conf' },
+        @{ Path = $SparkCasdConfSource; Name = 'CASD configuration folder' }
     )
 
-    if (-not (Test-Path -LiteralPath $DestinationRoot)) {
-        New-Item -ItemType Directory -Path $DestinationRoot -Force | Out-Null
+    foreach ($item in $requiredSources) {
+        if (-not (Test-Path -LiteralPath $item.Path)) {
+            Write-Err "Required source configuration not found: '$($item.Path)' ($($item.Name))"
+            Write-Err "Please ensure all expected source configuration files exist before running this script."
+            exit 1
+        }
     }
 
-    $tempDir = Join-Path $DestinationRoot (".tmp_{0}" -f [guid]::NewGuid().ToString('N').Substring(0, 8))
-    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
-
-    try {
-        Write-Info "Extracting archive: $(Split-Path $ZipPath -Leaf)"
-        Expand-Archive -LiteralPath $ZipPath -DestinationPath $tempDir -Force
-
-        $items = @(Get-ChildItem -LiteralPath $tempDir -Force)
-        $sourceDir = $null
-
-        if ($items.Count -eq 1 -and $items[0].PSIsContainer) {
-            $sourceDir = $items[0].FullName
+    # Optional: Warn if specific token files mentioned in docs are missing from the CASD folder
+    $expectedTokenFiles = @('install-tokens.ps1', 'refresh-token.ps1', 'casd_spark.py', 'casd_spark.R', 'make-creds-file-1.0.0-SNAPSHOT.jar')
+    $missingTokenFiles = @()
+    foreach ($tokenFile in $expectedTokenFiles) {
+        $tokenPath = Join-Path $SparkCasdConfSource $tokenFile
+        if (-not (Test-Path -LiteralPath $tokenPath)) {
+            $missingTokenFiles += $tokenFile
         }
-        elseif (Test-Path -LiteralPath (Join-Path $tempDir 'bin')) {
-            $sourceDir = $tempDir
+    }
+
+    if ($missingTokenFiles.Count -gt 0) {
+        Write-Warn "The following expected token management files are missing from '$SparkCasdConfSource':"
+        foreach ($missing in $missingTokenFiles) { Write-Warn "  - $missing" }
+        Write-Warn "Script will continue, but token management may not work correctly."
+    } else {
+        Write-Ok "All required source configuration and token files found."
+    }
+
+    # --------------------------------------------------------------
+    # Step 1: Detect SPARK_HOME and HADOOP_HOME
+    # --------------------------------------------------------------
+    Write-Step 'Step 1: Detect SPARK_HOME and HADOOP_HOME environment variables'
+
+    $sparkHome = [Environment]::GetEnvironmentVariable('SPARK_HOME', 'User')
+    if ([string]::IsNullOrWhiteSpace($sparkHome)) {
+        $sparkHome = [Environment]::GetEnvironmentVariable('SPARK_HOME', 'Machine')
+    }
+
+    $hadoopHome = [Environment]::GetEnvironmentVariable('HADOOP_HOME', 'User')
+    if ([string]::IsNullOrWhiteSpace($hadoopHome)) {
+        $hadoopHome = [Environment]::GetEnvironmentVariable('HADOOP_HOME', 'Machine')
+    }
+
+    if ([string]::IsNullOrWhiteSpace($sparkHome) -or [string]::IsNullOrWhiteSpace($hadoopHome)) {
+        Write-Err 'Missing required environment variables. Please run `install_spark.ps1` first.'
+        if ([string]::IsNullOrWhiteSpace($sparkHome)) { Write-Err '  Missing: SPARK_HOME' }
+        if ([string]::IsNullOrWhiteSpace($hadoopHome)) { Write-Err '  Missing: HADOOP_HOME' }
+        exit 1
+    }
+
+    if (-not (Test-Path -LiteralPath $sparkHome -PathType Container)) {
+        Write-Err "SPARK_HOME exists but is not a valid directory: '$sparkHome'"
+        exit 1
+    }
+
+    if (-not (Test-Path -LiteralPath $hadoopHome -PathType Container)) {
+        Write-Err "HADOOP_HOME exists but is not a valid directory: '$hadoopHome'"
+        exit 1
+    }
+
+    Write-Ok "SPARK_HOME  = $sparkHome"
+    Write-Ok "HADOOP_HOME = $hadoopHome"
+
+    # Make these available in the current process.
+    $env:SPARK_HOME = $sparkHome
+    $env:HADOOP_HOME = $hadoopHome
+
+    $javaHome = [Environment]::GetEnvironmentVariable('JAVA_HOME', 'User')
+    if ([string]::IsNullOrWhiteSpace($javaHome)) {
+        $javaHome = [Environment]::GetEnvironmentVariable('JAVA_HOME', 'Machine')
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($javaHome)) {
+        $env:JAVA_HOME = $javaHome
+        Write-Info "Using JAVA_HOME: $javaHome"
+    }
+
+    # --------------------------------------------------------------
+    # Step 2: Copy Hadoop configuration files
+    # --------------------------------------------------------------
+    Write-Step 'Step 2: Copy Hadoop configuration files'
+
+    # Check if HADOOP_CONF_DIR already exists, otherwise default and create it
+    $hadoopConfDir = [Environment]::GetEnvironmentVariable('HADOOP_CONF_DIR', 'User')
+    if ([string]::IsNullOrWhiteSpace($hadoopConfDir)) {
+        $hadoopConfDir = [Environment]::GetEnvironmentVariable('HADOOP_CONF_DIR', 'Machine')
+    }
+
+    if ([string]::IsNullOrWhiteSpace($hadoopConfDir)) {
+        $hadoopConfDir = Join-Path $hadoopHome 'etc\hadoop'
+        Write-Info "HADOOP_CONF_DIR not set. Defaulting to: $hadoopConfDir"
+        [Environment]::SetEnvironmentVariable('HADOOP_CONF_DIR', $hadoopConfDir, 'User')
+        Write-Info "Created user environment variable: HADOOP_CONF_DIR = $hadoopConfDir"
+    }
+    else {
+        Write-Info "Using existing HADOOP_CONF_DIR: $hadoopConfDir"
+    }
+
+    $coreSiteTarget = Copy-ClusterConfigFile `
+        -SourceFile $CoreSiteXmlSource `
+        -DestinationDir $hadoopConfDir `
+        -DestinationFileName 'core-site.xml'
+
+    $hdfsSiteTarget = Copy-ClusterConfigFile `
+        -SourceFile $HdfsSiteXmlSource `
+        -DestinationDir $hadoopConfDir `
+        -DestinationFileName 'hdfs-site.xml'
+
+    $yarnSiteTarget = Copy-ClusterConfigFile `
+        -SourceFile $YarnSiteXmlSource `
+        -DestinationDir $hadoopConfDir `
+        -DestinationFileName 'yarn-site.xml'
+
+    # Useful for Hadoop/YARN commands in the current process.
+    $env:HADOOP_CONF_DIR = $hadoopConfDir
+
+    # --------------------------------------------------------------
+    # Step 3: Copy Spark configuration file
+    # --------------------------------------------------------------
+    Write-Step 'Step 3: Copy Spark configuration files'
+
+    $sparkConfDir = Join-Path $sparkHome 'conf'
+
+    Write-Info "Spark configuration directory: $sparkConfDir"
+
+    $sparkDefaultsTarget = Copy-ClusterConfigFile `
+        -SourceFile $SparkDefaultsConfSource `
+        -DestinationDir $sparkConfDir `
+        -DestinationFileName 'spark-defaults.conf'
+
+    # --------------------------------------------------------------
+    # Step 4: Copy CASD cluster mode scripts and token management files
+    # --------------------------------------------------------------
+    Write-Step 'Step 4: Copy CASD cluster mode scripts and token management files'
+
+    $sparkCasdTargetDir = Join-Path $sparkConfDir $sparkCasdDirName
+
+    # Using the dedicated helper function for consistency, backup creation, and proper logging
+    Copy-CustomConfFolder `
+        -SourceDir $SparkCasdConfSource `
+        -DestinationDir $sparkCasdTargetDir | Out-Null
+
+    Write-Ok "CASD configuration copied to: $sparkCasdTargetDir"
+
+    # --------------------------------------------------------------
+    # Step 5: Optional Hadoop command checks
+    # --------------------------------------------------------------
+    if ($UseHadoopCommandChecks) {
+        Write-Step 'Step 5: Optional Hadoop command checks'
+
+        $hdfsCmd = Join-Path $hadoopHome 'bin\hdfs.cmd'
+        $yarnCmd = Join-Path $hadoopHome 'bin\yarn.cmd'
+
+        $hdfsOk = Test-HadoopCommand `
+            -CommandPath $hdfsCmd `
+            -CommandArgs @('dfsadmin', '-report') `
+            -Description 'hdfs dfsadmin -report'
+
+        $yarnOk = Test-HadoopCommand `
+            -CommandPath $yarnCmd `
+            -CommandArgs @('node', '-list') `
+            -Description 'yarn node -list'
+
+        if (-not $hdfsOk -or -not $yarnOk) {
+            Write-Warn 'One or more Hadoop command checks failed.'
+            Write-Warn 'TCP connectivity may still be OK, but Hadoop commands may require JAVA_HOME, HADOOP_CONF_DIR, Kerberos tickets, or winutils.'
         }
         else {
-            $withBin = @($items | Where-Object { $_.PSIsContainer -and (Test-Path -LiteralPath (Join-Path $_.FullName 'bin')) })
-            $sourceDir = if ($withBin.Count -ge 1) { $withBin[0].FullName } else { $tempDir }
-        }
-
-        $targetPath = Join-Path $DestinationRoot $TargetFolderName
-        if (Test-Path -LiteralPath $targetPath) {
-            Remove-Item -LiteralPath $targetPath -Recurse -Force
-        }
-
-        Move-Item -LiteralPath $sourceDir -Destination $targetPath -Force
-        return $targetPath
-    }
-    finally {
-        if (Test-Path -LiteralPath $tempDir) {
-            Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Ok 'Hadoop command checks succeeded.'
         }
     }
+
+    # --------------------------------------------------------------
+    # Final summary
+    # --------------------------------------------------------------
+    Write-Step 'Setup completed'
+
+    Write-Host ''
+    Write-Host 'Copied configuration files:' -ForegroundColor Cyan
+    Write-Host "  core-site.xml       = $coreSiteTarget"
+    Write-Host "  hdfs-site.xml       = $hdfsSiteTarget"
+    Write-Host "  yarn-site.xml       = $yarnSiteTarget"
+    Write-Host "  spark-defaults.conf = $sparkDefaultsTarget"
+    Write-Host "  casd_custom_conf    = $sparkCasdTargetDir"
+
+    Write-Host ''
+    Write-Host 'Process environment used by this script:' -ForegroundColor Cyan
+    Write-Host "  SPARK_HOME      = $env:SPARK_HOME"
+    Write-Host "  HADOOP_HOME     = $env:HADOOP_HOME"
+    Write-Host "  HADOOP_CONF_DIR = $env:HADOOP_CONF_DIR"
+
+    Write-Host ''
+    Write-Ok 'Hadoop and Spark cluster configuration setup finished successfully.'
 }
-
-# ==================================================================
-# MAIN EXECUTION PIPELINE
-# ==================================================================
-
-Write-Step 'Step 1: Detect local source packages'
-
-Write-Info "Current User             : $env:USERNAME"
-Write-Info "Java source directory   : $_javaSrcDir"
-Write-Info "Hadoop source directory : $_hadoopSrcDir"
-Write-Info "Spark source directory  : $_sparkSrcDir"
-Write-Info "Managed install root    : $InstallRoot"
-
-$javaPackages   = @(Get-ZipPackages -Path $_javaSrcDir   -Prefix 'jdk')
-$hadoopPackages = @(Get-ZipPackages -Path $_hadoopSrcDir -Prefix 'hadoop')
-$sparkPackages  = @(Get-ZipPackages -Path $_sparkSrcDir  -Prefix 'spark')
-
-Write-Host ''
-Write-Info ("JDK packages found    : {0}" -f $javaPackages.Count)
-$javaPackages | ForEach-Object { Write-Host ("  - {0} ({1})" -f $_.Version, $_.Name) }
-
-Write-Info ("Hadoop packages found : {0}" -f $hadoopPackages.Count)
-$hadoopPackages | ForEach-Object { Write-Host ("  - {0} ({1})" -f $_.Version, $_.Name) }
-
-Write-Info ("Spark packages found  : {0}" -f $sparkPackages.Count)
-$sparkPackages | ForEach-Object { Write-Host ("  - {0} ({1})" -f $_.Version, $_.Name) }
-
-if ($sparkPackages.Count -eq 0) {
-    Write-Err "No Spark zip packages detected in '$_sparkSrcDir'."
-    Write-Err 'Expected file name format: spark-x.x.x.zip'
+catch {
+    Write-Err $_.Exception.Message
     exit 1
 }
-
-Write-Step 'Step 2: Select Spark version and validate dependencies'
-
-$selectedSpark = $null
-$targetVersionPattern = '^\d+(\.\d+){1,3}$'
-
-if (-not [string]::IsNullOrWhiteSpace($TargetSparkVersion)) {
-    $TargetSparkVersion = $TargetSparkVersion.Trim()
-
-    if ($TargetSparkVersion -notmatch $targetVersionPattern) {
-        Write-Err "Invalid -TargetSparkVersion '$TargetSparkVersion'."
-        exit 1
-    }
-
-    $selectedSpark = @($sparkPackages | Where-Object { $_.Version -eq $TargetSparkVersion }) | Select-Object -First 1
-
-    if (-not $selectedSpark) {
-        Write-Err "Spark version '$TargetSparkVersion' was not found in '$_sparkSrcDir'."
-        exit 1
-    }
-}
-else {
-    $selectedSpark = Select-SparkPackage -SparkPackages $sparkPackages
-    if (-not $selectedSpark) {
-        Write-Info 'No Spark version selected. Exiting.'
-        exit 0
-    }
-}
-
-Write-Info ("Selected Spark version : {0}" -f $selectedSpark.Version)
-
-$dependencyRule = Get-SparkDependencyRule -SparkVersion $selectedSpark.Version
-if (-not $dependencyRule) {
-    Write-Err ("No dependency rule found for Spark {0}. Update `$SparkDependencyMap." -f $selectedSpark.Version)
-    exit 1
-}
-
-$selectedJava   = Select-EligibleJava   -JavaPackages $javaPackages     -RequiredMajors $dependencyRule.JavaMajorVersions
-$selectedHadoop = Select-EligibleHadoop -HadoopPackages $hadoopPackages -RequiredPrefixes $dependencyRule.HadoopVersionPrefixes
-
-if (-not $selectedJava -or -not $selectedHadoop) {
-    Write-Err "Dependency validation failed for Spark $($selectedSpark.Version):"
-    if (-not $selectedJava)   { Write-Err "  - Missing JDK Major Version: $($dependencyRule.JavaMajorVersions -join ', ')" }
-    if (-not $selectedHadoop) { Write-Err "  - Missing Hadoop Version Prefix: $($dependencyRule.HadoopVersionPrefixes -join ', ')" }
-    exit 1
-}
-
-Write-Ok ("Matched JDK    : {0} ({1})" -f $selectedJava.Version, $selectedJava.Name)
-Write-Ok ("Matched Hadoop : {0} ({1})" -f $selectedHadoop.Version, $selectedHadoop.Name)
-
-Write-Step 'Step 3: Cleanup previous managed user installations'
-
-Backup-UserEnvironment -InstallRoot $InstallRoot
-Remove-ManagedEnvironmentVariables -InstallRoot $InstallRoot -CleanAll:$CleanAllRelatedUserVariables
-
-Write-Step 'Step 4: Unpack binaries into managed root'
-
-$javaInstallDir   = Expand-ZipToManagedFolder -ZipPath $selectedJava.FullPath   -DestinationRoot $InstallRoot -TargetFolderName "jdk-$($selectedJava.Version)"
-$hadoopInstallDir = Expand-ZipToManagedFolder -ZipPath $selectedHadoop.FullPath -DestinationRoot $InstallRoot -TargetFolderName "hadoop-$($selectedHadoop.Version)"
-$sparkInstallDir  = Expand-ZipToManagedFolder -ZipPath $selectedSpark.FullPath  -DestinationRoot $InstallRoot -TargetFolderName "spark-$($selectedSpark.Version)"
-
-# Security & Execution Check: Validate Hadoop winutils.exe
-$winutilsPath = Join-Path $hadoopInstallDir "bin\winutils.exe"
-if (-not (Test-Path -LiteralPath $winutilsPath)) {
-    Write-Warn "Hadoop winutils.exe missing at '$winutilsPath'."
-    Write-Warn "Spark local operations on Windows require winutils.exe in %HADOOP_HOME%\bin."
-}
-
-Write-Step 'Step 5: Configure User environment scope'
-
-Set-UserEnvironmentVariable -Name 'JAVA_HOME'   -Value $javaInstallDir
-Set-UserEnvironmentVariable -Name 'HADOOP_HOME' -Value $hadoopInstallDir
-Set-UserEnvironmentVariable -Name 'SPARK_HOME'  -Value $sparkInstallDir
-
-$binPathsToAdd = @(
-    (Join-Path $javaInstallDir 'bin'),
-    (Join-Path $hadoopInstallDir 'bin'),
-    (Join-Path $sparkInstallDir 'bin')
-)
-Add-UserPathVariable -Paths $binPathsToAdd
-
-# Pre-create Hive local scratch directory with Modify permissions for driver execution
-$hiveTmpPath = "C:\tmp\hive"
-if (-not (Test-Path $hiveTmpPath)) {
-    New-Item -Path $hiveTmpPath -ItemType Directory -Force | Out-Null
-}
-
-Write-Step 'Installation Complete'
-Write-Ok "Spark $($selectedSpark.Version) installed successfully for user $env:USERNAME."
-Write-Ok "JAVA_HOME   = $javaInstallDir"
-Write-Ok "HADOOP_HOME = $hadoopInstallDir"
-Write-Ok "SPARK_HOME  = $sparkInstallDir"
