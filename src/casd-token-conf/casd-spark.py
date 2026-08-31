@@ -1,9 +1,11 @@
+from __future__ import annotations # this can avoid error like name SparkSession is not defined in type hint
 import atexit
 import logging
 import os
 import shutil
 import subprocess
 import tempfile
+import re
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Generator, Optional
@@ -15,7 +17,6 @@ try:
     import winreg
 except ImportError:  # Non-Windows environments
     winreg = None
-
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ class RegistryConfigError(RuntimeError):
 
 
 class TokenError(RuntimeError):
-    """Raised when a Hadoop session token cannot be created."""
+    """Raised when a Hadoop session token cannot be created or managed."""
 
 
 def _tail(text: Optional[str], limit: int = 2000) -> str:
@@ -70,10 +71,7 @@ def _to_port(value: Any, field_name: str) -> int:
     return port
 
 
-def get_registry_config(
-    sub_key: str = _REG_PATH,
-    required: bool = True,
-) -> Dict[str, str]:
+def get_registry_config(sub_key: str = _REG_PATH, required: bool = True) -> Dict[str, str]:
     """
     Read Windows Registry values into a dictionary.
 
@@ -98,7 +96,7 @@ def get_registry_config(
                 except OSError:
                     break
 
-                # Skip the unnamed default value unless you intentionally use it.
+                # Skip the unnamed default value unless intentionally used.
                 if name:
                     values[name] = str(value)
 
@@ -131,7 +129,6 @@ def _find_powershell(config: Dict[str, str]) -> str:
 
     if configured:
         configured = _expand_path(configured)
-
         found = shutil.which(configured)
         if found:
             return found
@@ -140,9 +137,7 @@ def _find_powershell(config: Dict[str, str]) -> str:
         if candidate.is_file():
             return str(candidate)
 
-        raise TokenError(
-            f"Configured PowerShellExe was not found: {configured}"
-        )
+        raise TokenError(f"Configured PowerShellExe was not found: {configured}")
 
     for candidate in ("powershell.exe", "pwsh.exe", "pwsh"):
         found = shutil.which(candidate)
@@ -164,12 +159,19 @@ class HadoopTokenManager:
 
     The token is placed in a private temporary directory and removed
     during cleanup.
+
+    NOTE: Because this uses the `-Out` parameter of the PowerShell script,
+    the token is NOT registered in the PS script's session registry for
+    automatic cluster-side revocation. The token file is deleted locally
+    on cleanup, and the token will naturally expire on the cluster based
+    on its configured max lifetime (e.g., 7 days). This is the standard
+    and safest pattern for short-lived, Python-managed Spark jobs.
     """
 
     def __init__(
-        self,
-        config: Optional[Dict[str, str]] = None,
-        timeout: float = _DEFAULT_TIMEOUT,
+            self,
+            config: Optional[Dict[str, str]] = None,
+            timeout: float = _DEFAULT_TIMEOUT,
     ) -> None:
         self.config = config if config is not None else get_registry_config()
         self.timeout = timeout
@@ -203,9 +205,7 @@ class HadoopTokenManager:
         ps_script = Path(_expand_path(tools_raw)) / "refresh-tokens.ps1"
 
         if not ps_script.is_file():
-            raise FileNotFoundError(
-                f"Token refresh script missing at: {ps_script}"
-            )
+            raise FileNotFoundError(f"Token refresh script missing at: {ps_script}")
 
         if self._temp_dir is None:
             self._temp_dir = tempfile.TemporaryDirectory(prefix="hadoop-token-")
@@ -213,6 +213,7 @@ class HadoopTokenManager:
         token_file = Path(self._temp_dir.name) / f"hadoop-{os.getpid()}.dt"
 
         # Avoid stale token files causing false success.
+        # missing_ok=True requires Python 3.8+
         token_file.unlink(missing_ok=True)
 
         cmd = [
@@ -244,9 +245,7 @@ class HadoopTokenManager:
                 f"Token script timed out after {run_kwargs['timeout']} seconds: {ps_script}"
             ) from exc
         except OSError as exc:
-            raise TokenError(
-                f"Could not execute token script {ps_script}: {exc}"
-            ) from exc
+            raise TokenError(f"Could not execute token script {ps_script}: {exc}") from exc
 
         if result.returncode != 0 or not token_file.is_file():
             raise TokenError(
@@ -258,7 +257,9 @@ class HadoopTokenManager:
             )
 
         try:
-            # Best-effort permission hardening. On Windows this has limited effect.
+            # Best-effort permission hardening.
+            # Note: The PowerShell script already applies strict NTFS ACLs,
+            # so this is just a secondary fallback.
             os.chmod(token_file, 0o600)
         except OSError:
             logger.debug(
@@ -272,6 +273,7 @@ class HadoopTokenManager:
         self._env_changed = True
         self.token_path = token_file
 
+        logger.info("Successfully generated Hadoop token at: %s", token_file)
         return token_file
 
     def cleanup(self) -> None:
@@ -283,21 +285,21 @@ class HadoopTokenManager:
                 os.environ.pop(_TOKEN_ENV_VAR, None)
             else:
                 os.environ[_TOKEN_ENV_VAR] = self._old_token_env
-
             self._env_changed = False
 
         self._old_token_env = None
 
         if self._temp_dir is not None:
+            temp_dir_name = getattr(self._temp_dir, "name", "<unknown>")
             try:
                 self._temp_dir.cleanup()
+                logger.debug("Cleaned up temporary token directory: %s", temp_dir_name)
             except OSError:
-                logger.debug(
+                logger.warning(
                     "Could not fully remove temporary token directory %s",
-                    getattr(self._temp_dir, "name", "<unknown>"),
+                    temp_dir_name,
                     exc_info=True,
                 )
-
             self._temp_dir = None
 
         self.token_path = None
@@ -306,19 +308,19 @@ class HadoopTokenManager:
         self.generate_token()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool:
         self.cleanup()
         return False
 
 
 def get_spark(
-    conf: Optional[Dict[str, Any]] = None,
-    master: str = "yarn",
-    app_name: str = "python",
-    driver_port: Optional[int] = None,
-    token_manager: Optional[HadoopTokenManager] = None,
-    config: Optional[Dict[str, str]] = None,
-    token_timeout: Optional[float] = None,
+        conf: Optional[Dict[str, Any]] = None,
+        master: str = "yarn",
+        app_name: str = "python",
+        driver_port: Optional[int] = None,
+        token_manager: Optional[HadoopTokenManager] = None,
+        config: Optional[Dict[str, str]] = None,
+        token_timeout: Optional[float] = None,
 ) -> SparkSession:
     """
     Initialize and return a SparkSession configured for the target environment.
@@ -357,9 +359,14 @@ def get_spark(
             mgr.generate_token()
 
     try:
+        # Late import to avoid requiring PySpark if not needed
+        from pyspark.sql import SparkSession
+
         builder = SparkSession.builder.master(master).appName(app_name)
 
         # Internal/base settings are applied first so user-provided conf can override them.
+        # Disabling Spark's internal credential renewal in favor of the pre-fetched token file
+        # is a known stable pattern for Windows/Kerberos YARN client mode.
         base_conf: Dict[str, Any] = {
             "spark.security.credentials.hadoopfs.enabled": "false",
             "spark.security.credentials.hive.enabled": "false",
@@ -384,13 +391,11 @@ def get_spark(
                 base_conf["spark.driver.blockManager.port"] = "0"
             else:
                 block_port = port + _BLOCK_MANAGER_PORT_OFFSET
-
                 if block_port > 65535:
                     raise ValueError(
                         "driver_port is too large for the block-manager offset. "
                         f"driver_port={port}, offset={_BLOCK_MANAGER_PORT_OFFSET}."
                     )
-
                 base_conf["spark.driver.blockManager.port"] = str(block_port)
 
         for key, value in base_conf.items():
@@ -408,7 +413,7 @@ def get_spark(
         raise
 
     if owns_token_manager and mgr is not None:
-        # Best-effort cleanup for callers that use get_spark() directly.
+        # Best-effort cleanup for callers that use get_spark() directly without a context manager.
         atexit.register(mgr.cleanup)
 
     return spark
@@ -416,12 +421,12 @@ def get_spark(
 
 @contextmanager
 def spark_session(
-    conf: Optional[Dict[str, Any]] = None,
-    master: str = "yarn",
-    app_name: str = "python",
-    driver_port: Optional[int] = None,
-    config: Optional[Dict[str, str]] = None,
-    token_timeout: Optional[float] = None,
+        conf: Optional[Dict[str, Any]] = None,
+        master: str = "yarn",
+        app_name: str = "python",
+        driver_port: Optional[int] = None,
+        config: Optional[Dict[str, str]] = None,
+        token_timeout: Optional[float] = None,
 ) -> Generator[SparkSession, None, None]:
     """
     Context manager for SparkSession that ensures proper cleanup.
@@ -438,7 +443,6 @@ def spark_session(
     )
 
     token_mgr: Optional[HadoopTokenManager] = None
-
     if master == "yarn":
         token_mgr = HadoopTokenManager(
             cfg,
@@ -464,11 +468,14 @@ def spark_session(
         yield spark
 
     finally:
+        # 1. Stop Spark FIRST. If we delete the token file before stopping,
+        # Spark may throw file-not-found errors during its shutdown sequence.
         if spark is not None:
             try:
                 spark.stop()
             except Exception as e:
                 logger.exception(f"Failed to stop SparkSession cleanly. {e}")
 
+        # 2. Clean up the token manager AFTER Spark has stopped.
         if token_mgr is not None:
             token_mgr.cleanup()

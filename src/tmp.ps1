@@ -8,14 +8,15 @@
     This script follows the below steps:
       0. Pre-flight check: Verifies all expected source configuration files exist. If any file is missing,
          it stops immediately and shows an error message.
-      1. Checks user/machine environment variables HADOOP_HOME and SPARK_HOME. If they exist, continues to step 2.
-         If not, stops and asks the user to run `install_spark.ps1`.
+      1. Checks user environment variables HADOOP_HOME, SPARK_HOME, and JAVA_HOME. If they exist, continues to step 2.
+         If not, stops and asks the user to install Spark, Hadoop, and Java first.
       2. Checks if HADOOP_CONF_DIR environment variable exists. If it does, copies custom Hadoop config files
-         there. If not, creates the environment variable HADOOP_CONF_DIR with value HADOOP_HOME\etc\hadoop,
+         there. If not, creates the environment variable HADOOP_CONF_DIR with value $HADOOP_HOME\etc\hadoop,
          then copies custom Hadoop config files to it.
       3. Copies custom Spark configuration files to SPARK_HOME\conf.
-      4. Copies CASD cluster mode scripts and token management files to SPARK_HOME\conf\casd.
-      5. (Optional) Checks whether the cluster endpoints are reachable via Hadoop commands.
+      4. Copies CASD cluster token manager configuration files to $TokenConfTargetDir.
+      5. Runs the install-tokens.ps1 script located in $TokenConfTargetDir.
+      6. (Optional) Checks whether the cluster endpoints are reachable via Hadoop commands.
 
     Expected Hadoop config files:
      - core-site.xml
@@ -23,13 +24,13 @@
      - yarn-site.xml
     Expected Spark config files:
      - spark-defaults.conf
-     - log4j2.properties (optional, handled via folder copy if present)
-    Expected token management files (inside CASD folder):
+     - log4j2.properties
+    Expected token management files (inside casd-token-conf folder):
      - install-tokens.ps1
-     - refresh-token.ps1
-     - casd_spark.py
-     - casd_spark.R
-     - make-creds-file-1.0.0-SNAPSHOT.jar
+     - refresh-tokens.ps1
+     - casd-spark.py
+     - casd-spark.R
+     - token-convertor.jar
 
 .NOTES
     This script only copies custom configuration files to Hadoop and Spark folders.
@@ -38,50 +39,101 @@
 
 [CmdletBinding()]
 param(
-    # Directory containing your custom configuration files.
-    [string]$ConfigSourceDir,
+    # Directory containing your cluster configuration source files.
+    [string]$ClusterConfSrcDir,
 
-    # Individual source files. If empty, they default to files under ConfigSourceDir.
-    [string]$CoreSiteXmlSource,
-    [string]$HdfsSiteXmlSource,
-    [string]$YarnSiteXmlSource,
-    [string]$SparkDefaultsConfSource,
-    [string]$SparkCasdConfSource,
-    [string]$sparkCasdDirName = "casd",
+    # Directory containing your token manager configuration source files.
+    [string]$TokenConfSrcDir,
 
-    # Optionally run hdfs/yarn command checks after TCP checks.
-    [switch]$UseHadoopCommandChecks
+    # Target Directory containing your token manager configuration files.
+    [string]$TokenConfTargetDir,
+
+    # Optionally run hdfs/yarn command checks.
+    [switch]$UseHadoopCommandChecks,
+
+    # Optional overrides for specific source file paths.
+    # Declared here to prevent Set-StrictMode -Version Latest errors.
+    [string]$coreSiteSrc,
+    [string]$hdfsSiteSrc,
+    [string]$yarnSiteSrc,
+    [string]$sparkDefaultsConfSrc,
+    [string]$sparkLogConfSrc,
+    [string]$pySparkAdapterSrc,
+    [string]$sparkLyrAdapterSrc,
+    [string]$tokenConvertorSrc,
+    [string]$installTokenScriptSrc,
+    [string]$refreshTokenScriptSrc
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 # ------------------------------------------------------------------
-# Default source file paths
+# Default token manager conf file names
 # ------------------------------------------------------------------
-if ([string]::IsNullOrWhiteSpace($ConfigSourceDir)) {
-    $ConfigSourceDir = Join-Path $PSScriptRoot 'clusters'
+$tokenConfDirName = 'casd-token-conf'
+$pySparkAdapterName = "casd-spark.py"
+$sparkLyrAdapterName = "casd-spark.R"
+$tokenConvertorName = "token-convertor.jar"
+$installTokenScriptName = "install-tokens.ps1"
+$refreshTokenScriptName = "refresh-tokens.ps1"
+
+# ------------------------------------------------------------------
+# Default cluster conf source file paths
+# ------------------------------------------------------------------
+$clusterConfDirName = 'cluster-conf'
+
+if ([string]::IsNullOrWhiteSpace($ClusterConfSrcDir)) {
+    $ClusterConfSrcDir = Join-Path $PSScriptRoot $clusterConfDirName
 }
 
-if ([string]::IsNullOrWhiteSpace($CoreSiteXmlSource)) {
-    $CoreSiteXmlSource = Join-Path $ConfigSourceDir 'core-site.xml'
+if ([string]::IsNullOrWhiteSpace($coreSiteSrc)) {
+    $coreSiteSrc = Join-Path $ClusterConfSrcDir 'core-site.xml'
 }
 
-if ([string]::IsNullOrWhiteSpace($HdfsSiteXmlSource)) {
-    $HdfsSiteXmlSource = Join-Path $ConfigSourceDir 'hdfs-site.xml'
+if ([string]::IsNullOrWhiteSpace($hdfsSiteSrc)) {
+    $hdfsSiteSrc = Join-Path $ClusterConfSrcDir 'hdfs-site.xml'
 }
 
-if ([string]::IsNullOrWhiteSpace($YarnSiteXmlSource)) {
-    $YarnSiteXmlSource = Join-Path $ConfigSourceDir 'yarn-site.xml'
+if ([string]::IsNullOrWhiteSpace($yarnSiteSrc)) {
+    $yarnSiteSrc = Join-Path $ClusterConfSrcDir 'yarn-site.xml'
 }
 
-if ([string]::IsNullOrWhiteSpace($SparkDefaultsConfSource)) {
-    $SparkDefaultsConfSource = Join-Path $ConfigSourceDir 'spark-defaults.conf'
+if ([string]::IsNullOrWhiteSpace($sparkDefaultsConfSrc)) {
+    $sparkDefaultsConfSrc = Join-Path $ClusterConfSrcDir 'spark-defaults.conf'
 }
 
-if ([string]::IsNullOrWhiteSpace($SparkCasdConfSource)) {
-    $SparkCasdConfSource = Join-Path $ConfigSourceDir $sparkCasdDirName
+if ([string]::IsNullOrWhiteSpace($sparkLogConfSrc)) {
+    $sparkLogConfSrc = Join-Path $ClusterConfSrcDir 'log4j2.properties'
 }
+
+# ------------------------------------------------------------------
+# Default token manager conf source file paths
+# ------------------------------------------------------------------
+if ([string]::IsNullOrWhiteSpace($TokenConfSrcDir)) {
+    $TokenConfSrcDir = Join-Path $PSScriptRoot $tokenConfDirName
+}
+
+if ([string]::IsNullOrWhiteSpace($pySparkAdapterSrc)) {
+    $pySparkAdapterSrc = Join-Path $TokenConfSrcDir $pySparkAdapterName
+}
+
+if ([string]::IsNullOrWhiteSpace($sparkLyrAdapterSrc)) {
+    $sparkLyrAdapterSrc = Join-Path $TokenConfSrcDir $sparkLyrAdapterName
+}
+
+if ([string]::IsNullOrWhiteSpace($tokenConvertorSrc)) {
+    $tokenConvertorSrc = Join-Path $TokenConfSrcDir $tokenConvertorName
+}
+
+if ([string]::IsNullOrWhiteSpace($installTokenScriptSrc)) {
+    $installTokenScriptSrc = Join-Path $TokenConfSrcDir $installTokenScriptName
+}
+
+if ([string]::IsNullOrWhiteSpace($refreshTokenScriptSrc)) {
+    $refreshTokenScriptSrc = Join-Path $TokenConfSrcDir $refreshTokenScriptName
+}
+
 
 # ------------------------------------------------------------------
 # Console helpers
@@ -114,7 +166,7 @@ function Write-Step {
 # ------------------------------------------------------------------
 # Config file copy helper
 # ------------------------------------------------------------------
-function Copy-ClusterConfigFile {
+function Copy-ConfigFile {
     param(
         [string]$SourceFile,
         [string]$DestinationDir,
@@ -166,7 +218,7 @@ function Copy-ClusterConfigFile {
 }
 
 # ------------------------------------------------------------------
-# Config folder copy helper
+# Config folder copy helper (Reserved for future use)
 # ------------------------------------------------------------------
 function Copy-CustomConfFolder {
     param(
@@ -267,78 +319,60 @@ try {
     Write-Step 'Step 0: Pre-flight check for source configuration files'
 
     $requiredSources = @(
-        @{ Path = $CoreSiteXmlSource; Name = 'core-site.xml' },
-        @{ Path = $HdfsSiteXmlSource; Name = 'hdfs-site.xml' },
-        @{ Path = $YarnSiteXmlSource; Name = 'yarn-site.xml' },
-        @{ Path = $SparkDefaultsConfSource; Name = 'spark-defaults.conf' },
-        @{ Path = $SparkCasdConfSource; Name = 'CASD configuration folder' }
+        @{ Path = $coreSiteSrc; Name = 'core-site.xml' },
+        @{ Path = $hdfsSiteSrc; Name = 'hdfs-site.xml' },
+        @{ Path = $yarnSiteSrc; Name = 'yarn-site.xml' },
+        @{ Path = $sparkDefaultsConfSrc; Name = 'spark-defaults.conf' },
+        @{ Path = $sparkLogConfSrc; Name = 'log4j2.properties' },
+        @{ Path = $pySparkAdapterSrc; Name = $pySparkAdapterName },
+        @{ Path = $sparkLyrAdapterSrc; Name = $sparkLyrAdapterName },
+        @{ Path = $tokenConvertorSrc; Name = $tokenConvertorName },
+        @{ Path = $installTokenScriptSrc; Name = $installTokenScriptName },
+        @{ Path = $refreshTokenScriptSrc; Name = $refreshTokenScriptName }
     )
 
     foreach ($item in $requiredSources) {
         if (-not (Test-Path -LiteralPath $item.Path)) {
-            Write-Err "Required source configuration not found: '$($item.Path)' ($($item.Name))"
-            Write-Err "Please ensure all expected source configuration files exist before running this script."
-            exit 1
+            throw "Required source configuration not found: '$($item.Path)' ($($item.Name)). Please ensure all expected source configuration files exist before running this script."
         }
-    }
-
-    # Optional: Warn if specific token files mentioned in docs are missing from the CASD folder
-    $expectedTokenFiles = @('install-tokens.ps1', 'refresh-token.ps1', 'casd_spark.py', 'casd_spark.R', 'make-creds-file-1.0.0-SNAPSHOT.jar')
-    $missingTokenFiles = @()
-    foreach ($tokenFile in $expectedTokenFiles) {
-        $tokenPath = Join-Path $SparkCasdConfSource $tokenFile
-        if (-not (Test-Path -LiteralPath $tokenPath)) {
-            $missingTokenFiles += $tokenFile
-        }
-    }
-
-    if ($missingTokenFiles.Count -gt 0) {
-        Write-Warn "The following expected token management files are missing from '$SparkCasdConfSource':"
-        foreach ($missing in $missingTokenFiles) { Write-Warn "  - $missing" }
-        Write-Warn "Script will continue, but token management may not work correctly."
-    } else {
-        Write-Ok "All required source configuration and token files found."
     }
 
     # --------------------------------------------------------------
     # Step 1: Detect SPARK_HOME and HADOOP_HOME
     # --------------------------------------------------------------
-    Write-Step 'Step 1: Detect SPARK_HOME and HADOOP_HOME environment variables'
+    Write-Step 'Step 1: Detect SPARK_HOME, HADOOP_HOME, and JAVA_HOME environment variables in user scope.'
 
     $sparkHome = [Environment]::GetEnvironmentVariable('SPARK_HOME', 'User')
     $hadoopHome = [Environment]::GetEnvironmentVariable('HADOOP_HOME', 'User')
+    $hadoopConfDir = [Environment]::GetEnvironmentVariable('HADOOP_CONF_DIR', 'User')
+    $javaHome = [Environment]::GetEnvironmentVariable('JAVA_HOME', 'User')
 
-    if ([string]::IsNullOrWhiteSpace($sparkHome) -or [string]::IsNullOrWhiteSpace($hadoopHome))
-    {
-        Write-Err 'user must install spark first'
+    if ([string]::IsNullOrWhiteSpace($sparkHome) -or [string]::IsNullOrWhiteSpace($hadoopHome) -or [string]::IsNullOrWhiteSpace($javaHome)) {
+        $errorMsg = "Missing required environment variables. You must install Spark, Hadoop, and Java first."
+        if ([string]::IsNullOrWhiteSpace($javaHome)) { $errorMsg += "`n  - Missing user environment variable: JAVA_HOME" }
+        if ([string]::IsNullOrWhiteSpace($sparkHome)) { $errorMsg += "`n  - Missing user environment variable: SPARK_HOME" }
+        if ([string]::IsNullOrWhiteSpace($hadoopHome)) { $errorMsg += "`n  - Missing user environment variable: HADOOP_HOME" }
+        throw $errorMsg
+    }
 
-        if ( [string]::IsNullOrWhiteSpace($sparkHome))
-        {
-            Write-Err 'Missing user environment variable: SPARK_HOME'
-        }
-
-        if ( [string]::IsNullOrWhiteSpace($hadoopHome))
-        {
-            Write-Err 'Missing user environment variable: HADOOP_HOME'
-        }
-
-        exit 1
+    if (-not (Test-Path -LiteralPath $javaHome -PathType Container)) {
+        throw "JAVA_HOME exists but is not a valid directory: '$javaHome'"
     }
 
     if (-not (Test-Path -LiteralPath $sparkHome -PathType Container)) {
-        Write-Err "SPARK_HOME exists but is not a valid directory: '$sparkHome'"
-        exit 1
+        throw "SPARK_HOME exists but is not a valid directory: '$sparkHome'"
     }
 
     if (-not (Test-Path -LiteralPath $hadoopHome -PathType Container)) {
-        Write-Err "HADOOP_HOME exists but is not a valid directory: '$hadoopHome'"
-        exit 1
+        throw "HADOOP_HOME exists but is not a valid directory: '$hadoopHome'"
     }
 
+    Write-Ok "JAVA_HOME   = $javaHome"
     Write-Ok "SPARK_HOME  = $sparkHome"
     Write-Ok "HADOOP_HOME = $hadoopHome"
 
     # Make these available in the current process.
+    $env:JAVA_HOME = $javaHome
     $env:SPARK_HOME = $sparkHome
     $env:HADOOP_HOME = $hadoopHome
 
@@ -347,7 +381,7 @@ try {
     # --------------------------------------------------------------
     Write-Step 'Step 2: Copy Hadoop configuration files'
 
-    # Check if HADOOP_CONF_DIR already exists, otherwise default and create it
+    # Check if HADOOP_CONF_DIR already exists, otherwise use HADOOP_HOME to create it
     if ([string]::IsNullOrWhiteSpace($hadoopConfDir)) {
         $hadoopConfDir = Join-Path $hadoopHome 'etc\hadoop'
         Write-Info "HADOOP_CONF_DIR not set. Defaulting to: $hadoopConfDir"
@@ -358,56 +392,75 @@ try {
         Write-Info "Using existing HADOOP_CONF_DIR: $hadoopConfDir"
     }
 
-    $coreSiteTarget = Copy-ClusterConfigFile `
-        -SourceFile $CoreSiteXmlSource `
-        -DestinationDir $hadoopConfDir `
-        -DestinationFileName 'core-site.xml'
-
-    $hdfsSiteTarget = Copy-ClusterConfigFile `
-        -SourceFile $HdfsSiteXmlSource `
-        -DestinationDir $hadoopConfDir `
-        -DestinationFileName 'hdfs-site.xml'
-
-    $yarnSiteTarget = Copy-ClusterConfigFile `
-        -SourceFile $YarnSiteXmlSource `
-        -DestinationDir $hadoopConfDir `
-        -DestinationFileName 'yarn-site.xml'
+    $coreSiteTarget = Copy-ConfigFile -SourceFile $coreSiteSrc -DestinationDir $hadoopConfDir -DestinationFileName 'core-site.xml'
+    $hdfsSiteTarget = Copy-ConfigFile -SourceFile $hdfsSiteSrc -DestinationDir $hadoopConfDir -DestinationFileName 'hdfs-site.xml'
+    $yarnSiteTarget = Copy-ConfigFile -SourceFile $yarnSiteSrc -DestinationDir $hadoopConfDir -DestinationFileName 'yarn-site.xml'
 
     # Useful for Hadoop/YARN commands in the current process.
     $env:HADOOP_CONF_DIR = $hadoopConfDir
 
     # --------------------------------------------------------------
-    # Step 3: Copy Spark configuration file
+    # Step 3: Copy Spark configuration files
     # --------------------------------------------------------------
     Write-Step 'Step 3: Copy Spark configuration files'
 
     $sparkConfDir = Join-Path $sparkHome 'conf'
-
     Write-Info "Spark configuration directory: $sparkConfDir"
 
-    $sparkDefaultsTarget = Copy-ClusterConfigFile `
-        -SourceFile $SparkDefaultsConfSource `
-        -DestinationDir $sparkConfDir `
-        -DestinationFileName 'spark-defaults.conf'
+    $sparkDefaultsTarget = Copy-ConfigFile -SourceFile $sparkDefaultsConfSrc -DestinationDir $sparkConfDir -DestinationFileName 'spark-defaults.conf'
+    $sparkLogTarget = Copy-ConfigFile -SourceFile $sparkLogConfSrc -DestinationDir $sparkConfDir -DestinationFileName 'log4j2.properties'
 
     # --------------------------------------------------------------
-    # Step 4: copy CASD token management files
+    # Step 4: Copy CASD cluster token management files
+    # --------------------------------------------------------------
+    Write-Step 'Step 4: Copy CASD cluster token management files'
+
+    if ([string]::IsNullOrWhiteSpace($TokenConfTargetDir)) {
+        $installationDir = (Get-Item $sparkHome).Parent.FullName
+        $TokenConfTargetDir = Join-Path $installationDir $tokenConfDirName
+    }
+
+    if (Test-Path -Path $TokenConfTargetDir -PathType Container) {
+        Write-Info "Using existing cluster token manager configuration directory: $TokenConfTargetDir"
+    }
+    else {
+        Write-Info "The cluster token manager configuration directory does not exist. Creating it now: $TokenConfTargetDir"
+        New-Item -ItemType Directory -Path $TokenConfTargetDir -Force | Out-Null
+    }
+
+    $pySparkAdapterTarget = Copy-ConfigFile -SourceFile $pySparkAdapterSrc -DestinationDir $TokenConfTargetDir -DestinationFileName $pySparkAdapterName
+    $sparkLyrAdapterTarget = Copy-ConfigFile -SourceFile $sparkLyrAdapterSrc -DestinationDir $TokenConfTargetDir -DestinationFileName $sparkLyrAdapterName
+    $tokenConvertorTarget = Copy-ConfigFile -SourceFile $tokenConvertorSrc -DestinationDir $TokenConfTargetDir -DestinationFileName $tokenConvertorName
+    $installTokenScriptTarget = Copy-ConfigFile -SourceFile $installTokenScriptSrc -DestinationDir $TokenConfTargetDir -DestinationFileName $installTokenScriptName
+    $refreshTokenScriptTarget = Copy-ConfigFile -SourceFile $refreshTokenScriptSrc -DestinationDir $TokenConfTargetDir -DestinationFileName $refreshTokenScriptName
+
+    # --------------------------------------------------------------
+    # Step 5: Run install-tokens.ps1 script in the $TokenConfTargetDir
+    # --------------------------------------------------------------
+    Write-Step 'Step 5: Run install-tokens.ps1 script'
+
+    try {
+        Write-Info "Executing token installation script: $installTokenScriptTarget"
+        & $installTokenScriptTarget
+        Write-Ok "install-tokens.ps1 executed successfully."
+    }
+    catch {
+        Write-Warn "Failed to execute install-tokens.ps1: $($_.Exception.Message)"
+        # Uncomment the line below if you want the entire setup to fail when token installation fails
+        # throw "Token installation failed."
+    }
+
+    # --------------------------------------------------------------
+    # Step 6: Hadoop command checks
     # --------------------------------------------------------------
     if ($UseHadoopCommandChecks) {
-        Write-Step 'Step 5: Optional Hadoop command checks'
+        Write-Step 'Step 6: Optional Hadoop command checks'
 
         $hdfsCmd = Join-Path $hadoopHome 'bin\hdfs.cmd'
         $yarnCmd = Join-Path $hadoopHome 'bin\yarn.cmd'
 
-        $hdfsOk = Test-HadoopCommand `
-            -CommandPath $hdfsCmd `
-            -CommandArgs @('dfsadmin', '-report') `
-            -Description 'hdfs dfsadmin -report'
-
-        $yarnOk = Test-HadoopCommand `
-            -CommandPath $yarnCmd `
-            -CommandArgs @('node', '-list') `
-            -Description 'yarn node -list'
+        $hdfsOk = Test-HadoopCommand -CommandPath $hdfsCmd -CommandArgs @('dfsadmin', '-report') -Description 'hdfs dfsadmin -report'
+        $yarnOk = Test-HadoopCommand -CommandPath $yarnCmd -CommandArgs @('node', '-list') -Description 'yarn node -list'
 
         if (-not $hdfsOk -or -not $yarnOk) {
             Write-Warn 'One or more Hadoop command checks failed.'
@@ -424,12 +477,20 @@ try {
     Write-Step 'Setup completed'
 
     Write-Host ''
-    Write-Host 'Copied configuration files:' -ForegroundColor Cyan
-    Write-Host "  core-site.xml       = $coreSiteTarget"
-    Write-Host "  hdfs-site.xml       = $hdfsSiteTarget"
-    Write-Host "  yarn-site.xml       = $yarnSiteTarget"
-    Write-Host "  spark-defaults.conf = $sparkDefaultsTarget"
-    Write-Host "  casd_custom_conf    = $sparkCasdTargetDir"
+    Write-Host 'Copied cluster configuration files:' -ForegroundColor Cyan
+    Write-Host ("  {0,-22} = {1}" -f 'core-site.xml', $coreSiteTarget)
+    Write-Host ("  {0,-22} = {1}" -f 'hdfs-site.xml', $hdfsSiteTarget)
+    Write-Host ("  {0,-22} = {1}" -f 'yarn-site.xml', $yarnSiteTarget)
+    Write-Host ("  {0,-22} = {1}" -f 'spark-defaults.conf', $sparkDefaultsTarget)
+    Write-Host ("  {0,-22} = {1}" -f 'log4j2.properties', $sparkLogTarget)
+
+    Write-Host ''
+    Write-Host 'Copied token manager configuration files:' -ForegroundColor Cyan
+    Write-Host ("  {0,-22} = {1}" -f $tokenConvertorName, $tokenConvertorTarget)
+    Write-Host ("  {0,-22} = {1}" -f $installTokenScriptName, $installTokenScriptTarget)
+    Write-Host ("  {0,-22} = {1}" -f $refreshTokenScriptName, $refreshTokenScriptTarget)
+    Write-Host ("  {0,-22} = {1}" -f $pySparkAdapterName, $pySparkAdapterTarget)
+    Write-Host ("  {0,-22} = {1}" -f $sparkLyrAdapterName, $sparkLyrAdapterTarget)
 
     Write-Host ''
     Write-Host 'Process environment used by this script:' -ForegroundColor Cyan
