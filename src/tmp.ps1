@@ -306,19 +306,22 @@ try {
     Write-Step 'Step 1: Detect SPARK_HOME and HADOOP_HOME environment variables'
 
     $sparkHome = [Environment]::GetEnvironmentVariable('SPARK_HOME', 'User')
-    if ([string]::IsNullOrWhiteSpace($sparkHome)) {
-        $sparkHome = [Environment]::GetEnvironmentVariable('SPARK_HOME', 'Machine')
-    }
-
     $hadoopHome = [Environment]::GetEnvironmentVariable('HADOOP_HOME', 'User')
-    if ([string]::IsNullOrWhiteSpace($hadoopHome)) {
-        $hadoopHome = [Environment]::GetEnvironmentVariable('HADOOP_HOME', 'Machine')
-    }
 
-    if ([string]::IsNullOrWhiteSpace($sparkHome) -or [string]::IsNullOrWhiteSpace($hadoopHome)) {
-        Write-Err 'Missing required environment variables. Please run `install_spark.ps1` first.'
-        if ([string]::IsNullOrWhiteSpace($sparkHome)) { Write-Err '  Missing: SPARK_HOME' }
-        if ([string]::IsNullOrWhiteSpace($hadoopHome)) { Write-Err '  Missing: HADOOP_HOME' }
+    if ([string]::IsNullOrWhiteSpace($sparkHome) -or [string]::IsNullOrWhiteSpace($hadoopHome))
+    {
+        Write-Err 'user must install spark first'
+
+        if ( [string]::IsNullOrWhiteSpace($sparkHome))
+        {
+            Write-Err 'Missing user environment variable: SPARK_HOME'
+        }
+
+        if ( [string]::IsNullOrWhiteSpace($hadoopHome))
+        {
+            Write-Err 'Missing user environment variable: HADOOP_HOME'
+        }
+
         exit 1
     }
 
@@ -339,27 +342,12 @@ try {
     $env:SPARK_HOME = $sparkHome
     $env:HADOOP_HOME = $hadoopHome
 
-    $javaHome = [Environment]::GetEnvironmentVariable('JAVA_HOME', 'User')
-    if ([string]::IsNullOrWhiteSpace($javaHome)) {
-        $javaHome = [Environment]::GetEnvironmentVariable('JAVA_HOME', 'Machine')
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($javaHome)) {
-        $env:JAVA_HOME = $javaHome
-        Write-Info "Using JAVA_HOME: $javaHome"
-    }
-
     # --------------------------------------------------------------
     # Step 2: Copy Hadoop configuration files
     # --------------------------------------------------------------
     Write-Step 'Step 2: Copy Hadoop configuration files'
 
     # Check if HADOOP_CONF_DIR already exists, otherwise default and create it
-    $hadoopConfDir = [Environment]::GetEnvironmentVariable('HADOOP_CONF_DIR', 'User')
-    if ([string]::IsNullOrWhiteSpace($hadoopConfDir)) {
-        $hadoopConfDir = [Environment]::GetEnvironmentVariable('HADOOP_CONF_DIR', 'Machine')
-    }
-
     if ([string]::IsNullOrWhiteSpace($hadoopConfDir)) {
         $hadoopConfDir = Join-Path $hadoopHome 'etc\hadoop'
         Write-Info "HADOOP_CONF_DIR not set. Defaulting to: $hadoopConfDir"
@@ -403,21 +391,7 @@ try {
         -DestinationFileName 'spark-defaults.conf'
 
     # --------------------------------------------------------------
-    # Step 4: Copy CASD cluster mode scripts and token management files
-    # --------------------------------------------------------------
-    Write-Step 'Step 4: Copy CASD cluster mode scripts and token management files'
-
-    $sparkCasdTargetDir = Join-Path $sparkConfDir $sparkCasdDirName
-
-    # Using the dedicated helper function for consistency, backup creation, and proper logging
-    Copy-CustomConfFolder `
-        -SourceDir $SparkCasdConfSource `
-        -DestinationDir $sparkCasdTargetDir | Out-Null
-
-    Write-Ok "CASD configuration copied to: $sparkCasdTargetDir"
-
-    # --------------------------------------------------------------
-    # Step 5: Optional Hadoop command checks
+    # Step 4: copy CASD token management files
     # --------------------------------------------------------------
     if ($UseHadoopCommandChecks) {
         Write-Step 'Step 5: Optional Hadoop command checks'
