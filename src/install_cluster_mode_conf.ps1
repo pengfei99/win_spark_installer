@@ -174,7 +174,7 @@ function Copy-ConfigFile {
     )
 
     if ([string]::IsNullOrWhiteSpace($SourceFile)) {
-        throw 'Configuration source file path is empty.'
+        throw 'Configuration source file path is null or empty.'
     }
 
     if (-not (Test-Path -LiteralPath $SourceFile -PathType Leaf)) {
@@ -188,21 +188,17 @@ function Copy-ConfigFile {
 
     $destinationFile = Join-Path $DestinationDir $DestinationFileName
 
-    # If source and destination are the same file, do nothing.
-    try {
+    # Prevent self-copy errors
+    if (Test-Path -LiteralPath $destinationFile) {
         $sourceResolved = (Get-Item -LiteralPath $SourceFile -ErrorAction Stop).FullName
-        if ((Test-Path -LiteralPath $destinationFile) -and
-                ((Get-Item -LiteralPath $destinationFile -ErrorAction Stop).FullName -eq $sourceResolved)) {
-            Write-Info "Source and destination are the same file: $destinationFile"
+        $destResolved = (Get-Item -LiteralPath $destinationFile -ErrorAction Stop).FullName
+
+        if ($sourceResolved -eq $destResolved) {
+            Write-Info "Source and destination are identical: $destinationFile"
             return $destinationFile
         }
-    }
-    catch {
-        # Ignore resolution issues and continue.
-    }
 
-    # Backup existing destination file.
-    if (Test-Path -LiteralPath $destinationFile) {
+        # Backup existing destination file
         $timestamp = Get-Date -Format 'yyyyMMddHHmmss'
         $backupFile = "{0}.backup.{1}" -f $destinationFile, $timestamp
 
@@ -285,26 +281,25 @@ function Test-HadoopCommand {
     )
 
     if (-not (Test-Path -LiteralPath $CommandPath -PathType Leaf)) {
-        Write-Warn "Command not found: '$CommandPath'. Skipping $Description."
+        Write-Warn "Command binary missing: '$CommandPath'. Skipping $Description."
         return $false
     }
 
-    Write-Info "Running: $CommandPath $( $CommandArgs -join ' ' )"
+    Write-Info "Executing: $CommandPath $( $CommandArgs -join ' ' )"
 
     try {
-        & $CommandPath @CommandArgs | Out-Null
-
-        if ($LASTEXITCODE -eq 0) {
+        $process = Start-Process -FilePath $CommandPath -ArgumentList $CommandArgs -Wait -NoNewWindow -PassThru
+        if ($process.ExitCode -eq 0) {
             Write-Ok "$Description succeeded."
             return $true
         }
         else {
-            Write-Warn "$Description failed with exit code $LASTEXITCODE."
+            Write-Warn "$Description failed with exit code $($process.ExitCode)."
             return $false
         }
     }
     catch {
-        Write-Warn "$Description failed: $( $_.Exception.Message )"
+        Write-Warn "$Description execution failed: $($_.Exception.Message)"
         return $false
     }
 }
@@ -437,24 +432,23 @@ try {
     # --------------------------------------------------------------
     # Step 5: Run install-tokens.ps1 script in the $TokenConfTargetDir
     # --------------------------------------------------------------
-    Write-Step 'Step 5: Run install-tokens.ps1 script'
+    Write-Step 'Step 5: Invoking token installation script'
 
     try {
         Write-Info "Executing token installation script: $installTokenScriptTarget"
         & $installTokenScriptTarget
-        Write-Ok "install-tokens.ps1 executed successfully."
+        Write-Ok "Token setup script completed successfully."
     }
     catch {
-        Write-Warn "Failed to execute install-tokens.ps1: $($_.Exception.Message)"
-        # Uncomment the line below if you want the entire setup to fail when token installation fails
-        # throw "Token installation failed."
+        Write-Err "Token script execution failed: $($_.Exception.Message)"
+        throw $_
     }
 
     # --------------------------------------------------------------
-    # Step 6: Hadoop command checks
+    # Step 6: Cluster Diagnostic Checks
     # --------------------------------------------------------------
     if ($UseHadoopCommandChecks) {
-        Write-Step 'Step 6: Optional Hadoop command checks'
+        Write-Step 'Step 6: Executing optional cluster health checks'
 
         $hdfsCmd = Join-Path $hadoopHome 'bin\hdfs.cmd'
         $yarnCmd = Join-Path $hadoopHome 'bin\yarn.cmd'
