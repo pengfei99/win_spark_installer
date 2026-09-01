@@ -1,115 +1,20 @@
 # win_spark_installer
 
-This objective of this project is to develop a powershell script which help user to install spark on their Windows server.
+The objective of this repo is to develop powershell scripts which help user to install jdk, hadoop and spark 
+on their Windows server. If the user's project has a hdfs/spark cluster. He can use the seconde script to install
+cluster configuration and security token configuration.
 
 ## scripts
 
-This project contains 5 powershell scripts:
-1. detect_existing_tools.ps1 : checks if user already installed spark and dependencies before
-2. check_prerequisites.ps1 : checks if the spark binary and related dependencies exist
-3. clean_legacy.ps1 : clean existing binary and config
-4. install_spark.ps1 : install spark and its dependencies
-5. post_installation_check.ps1: check if the binaries is working(e.g. java -version, spark-submit --version, etc.) 
-6. cluster_config.ps1: if user need to use this spark in mode cluster, need to add cluster specific config (e.g. )
+This project contains two main powershell scripts:
+
+1. install_spark.ps1 : install jdk, hadoop and spark binary. After this step, user can run spark on local mode.
+2. install_cluster_mode_conf.ps1: if the user's project has a hdfs/spark cluster, he needs to run this script to install
+              cluster specific configuration for hadoop and spark. And cluster security token configuration for the hdfs, yarn, and spark client.
 
 ## Workflow
 
-1. determine current situation
-2. based on the found source| generate a list of target spark which user can install. For example, if we find spark 4.1, jdk 21 and hadoop 3.4.3
-    then we can propose to install spark 4.1
-
-
-### 1. determine current situation
-
-1. Check available jdk, hadoop, spark source in a configured directory path:
-
-For jdk, the path will be `C:\Users\pliu\Documents\tools\java`, 
-There are multiple jdk versions exist: 
-- jdk 11: `C:\Users\pliu\Documents\tools\java\jdk-11.0.30.zip`
-- jdk 17: `C:\Users\pliu\Documents\tools\java\jdk-17.0.18.zip`
-- jdk 21: `C:\Users\pliu\Documents\tools\java\jdk-21.0.10.zip`
-
-For spark, the path will be `C:\Users\pliu\Documents\tools\spark`
-- spark 3.5.7: `C:\Users\pliu\Documents\tools\spark\spark-3.5.7.zip`
-- spark 4.1.2: `C:\Users\pliu\Documents\tools\spark\spark-4.1.2.zip`
-
-For hadoop, the path will be `C:\Users\pliu\Documents\tools\hadoop`
-- hadoop 3.3.6: `C:\Users\pliu\Documents\tools\hadoop\hadoop-3.3.6.zip`
-- hadoop 3.4.3: `C:\Users\pliu\Documents\tools\hadoop\hadoop-3.4.3.zip`
-
-2. if spark-x.x.x.zip is detected, propose each spark version as a choice of possible installation option.
-If user want to install a version of spark, check if the required jdk, hadoop source exist or not, if existed, continue
-the installation, if not, show error message, missing required packages.
-
-3. check if a spark is already installed and the installed spark version. If the user selected spark version 
-and the existing version are matched, ask user to confirm if user wants to do a reinstallation. If user choose yes, then
-start the installation process, if user choose no, do nothing.
-4. start the installation process, remove installed spark version and it's dependencies. clean user environment variable.
-install the user selected spark version.
-
-## enable cluster mode script
-
-1. detect if user environment variables contains `SPARK_HOME` and `HADOOP_HOME`, if not, stop the scripts and 
-print error message "user must install spark first", if exist, continue to step 2.
-2. copy custom configuration files `core-site.xml`, `hdfs-site.xml`, and `yarn-site.xml` to the directory $HADOOP_HOME/etc/hadoop
-3. copy custom configuration file `spark-defaults.conf` to the directory $SPARK_HOME/conf
-4. check if the cluster is reachable after the configuration.
-
-## Appendix A. spark dependencies
-
-
-### A.1 Spark 4.1.x 
-
-- JDK 17
-- hadoop 3.4.3 
-
-| Component  | Recommended Version | Compatibility Note                                                     |
-|------------|---------------------|------------------------------------------------------------------------|
-| JDK (Java) | Java 17 LTS         | Required. Spark 4.x officially dropped support for Java 8 and Java 11. |
-| Hadoop     | Apache Hadoop 3.4.x | Spark 4.x distributions are pre-built targeting Hadoop 3.4+.           |
-| Scala      | Scala 2.13          | Built-in (Scala 2.12 dropped in Spark 4.0).                            |
-
-> We know that JDK 21 LTS works also, we choose 17 for better compatibility with hadoop 3.4.x.
-
-### A.2 Spark 3.5.x
-
-- JDK 11
-- hadoop 3.3.6
-- 
-| Component  | Recommended Version | Compatibility Note                                                    |
-|------------|---------------------|-----------------------------------------------------------------------|
-| JDK (Java) | Java 11 LTS         | Required. Spark 4.x officially dropped support for Java 8 and Java 11. |
-| Hadoop     | Apache Hadoop 3.3.x | Spark 3.x distributions are pre-built targeting Hadoop 3.3.x.         |
-| Scala      | Scala 2.12          | Built-in (Scala 2.12 dropped in Spark 4.0).                           |
-
-```text
-[ PHASE 1: DETECTION ]
-       │
-       ├──► current situation: Check User Environment Scope (HKCU\Environment)
-       │      ├── JAVA_HOME ──► Validate bin\java.exe (Java 17+ check)
-       │      ├── HADOOP_HOME ──► Validate bin\winutils.exe
-       │      └── SPARK_HOME ──► Validate bin\spark-submit.cmd
-       │
-       └──► check available source:
-       
-       │
-[ PHASE 2: PREREQUISITE VALIDATION ]
-       │
-       ├──► Verify presence of offline staging archives (.zip / .tgz)
-       ├──► Perform optional SHA-256 hash integrity validation
-       └──► Block installation if Java version < 17 (Spark 4.x requirement)
-       │
-[ PHASE 3: STACK PROVISIONING & SECURITY HARDENING ]
-       │
-       ├──► Unpack JDK & Spark to space-free directories
-       ├──► Provision Hadoop native Windows binaries (winutils.exe / hadoop.dll)
-       ├──► Pre-create C:\tmp\hive with user Modify ACLs (Required for local Driver execution)
-       ├──► Lock down installation root with NTFS ACLs (Admins/SYSTEM: Full; Users: Read/Execute)
-       └──► Export User-scoped Environment Variables (HKCU) & prepend bin to PATH
-       │
-[ PHASE 4: VERIFICATION & CLUSTER CONNECTIVITY ]
-       │
-       ├──► Test JVM execution (& $JAVA_HOME\bin\java.exe -version)
-       ├──► Validate spark-submit.cmd resolution
-       └──► Perform test submission to remote YARN or Spark Standalone cluster
-```
+1. Run `install_spark.ps1` to install jdk, hadoop and spark binary
+2. Check if the installation is successes. Run pyspark or sparklyr jobs.
+3. Run `install_cluster_mode_conf.ps1`
+4. Check hdfs cluster accessibility via `hdfs dfs -ls /`
