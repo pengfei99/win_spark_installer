@@ -183,23 +183,24 @@ function Copy-ConfigFile {
 
     if (-not (Test-Path -LiteralPath $DestinationDir)) {
         Write-Info "Creating directory: $DestinationDir"
-        New-Item -ItemType Directory -Path $DestinationDir -Force | Out-Null
+        New-Item -ItemType Directory -LiteralPath $DestinationDir -Force | Out-Null
     }
 
     $destinationFile = Join-Path $DestinationDir $DestinationFileName
 
     # Prevent self-copy errors
     if (Test-Path -LiteralPath $destinationFile) {
-        $sourceResolved = (Get-Item -LiteralPath $SourceFile -ErrorAction Stop).FullName
-        $destResolved = (Get-Item -LiteralPath $destinationFile -ErrorAction Stop).FullName
+        # Use Resolve-Path for more robust comparison (handles symlinks/mapped drives better)
+        $sourceResolved = (Resolve-Path -LiteralPath $SourceFile -ErrorAction SilentlyContinue).Path
+        $destResolved = (Resolve-Path -LiteralPath $destinationFile -ErrorAction SilentlyContinue).Path
 
-        if ($sourceResolved -eq $destResolved) {
+        if ($sourceResolved -and $destResolved -and $sourceResolved -eq $destResolved) {
             Write-Info "Source and destination are identical: $destinationFile"
             return $destinationFile
         }
 
         # Backup existing destination file
-        $timestamp = Get-Date -Format 'yyyyMMddHHmmss'
+        $timestamp = Get-Date -Format 'yyyyMMddHHmmssff'
         $backupFile = "{0}.backup.{1}" -f $destinationFile, $timestamp
 
         Write-Info "Backing up existing file: $destinationFile"
@@ -226,9 +227,17 @@ function Copy-CustomConfFolder {
         throw "Custom configuration folder not found: '$SourceDir'"
     }
 
+    # Prevent self-copy (source and destination directories are identical)
+    $sourceResolved = (Resolve-Path -LiteralPath $SourceDir -ErrorAction SilentlyContinue).Path
+    $destResolved   = (Resolve-Path -LiteralPath $DestinationDir -ErrorAction SilentlyContinue).Path
+    if (-not [string]::IsNullOrWhiteSpace($sourceResolved) -and $sourceResolved -eq $destResolved) {
+        Write-Info "Source and destination directories are identical: $SourceDir"
+        return @()
+    }
+
     if (-not (Test-Path -LiteralPath $DestinationDir)) {
         Write-Info "Creating directory: $DestinationDir"
-        New-Item -ItemType Directory -Path $DestinationDir -Force | Out-Null
+        New-Item -ItemType Directory -LiteralPath $DestinationDir -Force | Out-Null
     }
 
     $files = @(Get-ChildItem -LiteralPath $SourceDir -Recurse -File -Force)
@@ -249,11 +258,11 @@ function Copy-CustomConfFolder {
 
         if (-not (Test-Path -LiteralPath $targetDir)) {
             Write-Info "Creating directory: $targetDir"
-            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+            New-Item -ItemType Directory -LiteralPath $targetDir -Force | Out-Null
         }
 
         if (Test-Path -LiteralPath $targetFile) {
-            $timestamp = Get-Date -Format 'yyyyMMddHHmmss'
+            $timestamp = Get-Date -Format 'yyyyMMddHHmmssff'
             $backupFile = "{0}.backup.{1}" -f $targetFile, $timestamp
 
             Write-Info "Backing up existing file: $targetFile"
@@ -285,16 +294,19 @@ function Test-HadoopCommand {
         return $false
     }
 
-    Write-Info "Executing: $CommandPath $( $CommandArgs -join ' ' )"
+    Write-Info "Executing: $CommandPath $($CommandArgs -join ' ')"
 
     try {
-        $process = Start-Process -FilePath $CommandPath -ArgumentList $CommandArgs -Wait -NoNewWindow -PassThru
-        if ($process.ExitCode -eq 0) {
+        # Using the call operator (&) is much more reliable than Start-Process for .cmd batch files
+        & $CommandPath @CommandArgs
+        $exitCode = $LASTEXITCODE
+
+        if ($exitCode -eq 0) {
             Write-Ok "$Description succeeded."
             return $true
         }
         else {
-            Write-Warn "$Description failed with exit code $($process.ExitCode)."
+            Write-Warn "$Description failed with exit code $exitCode."
             return $false
         }
     }
@@ -335,18 +347,20 @@ try {
     # --------------------------------------------------------------
     # Step 1: Detect SPARK_HOME and HADOOP_HOME
     # --------------------------------------------------------------
-    Write-Step 'Step 1: Detect SPARK_HOME, HADOOP_HOME, and JAVA_HOME environment variables in user scope.'
+    Write-Step 'Step 1: Detect SPARK_HOME, HADOOP_HOME, and JAVA_HOME environment variables.'
 
-    $sparkHome = [Environment]::GetEnvironmentVariable('SPARK_HOME', 'User')
-    $hadoopHome = [Environment]::GetEnvironmentVariable('HADOOP_HOME', 'User')
-    $hadoopConfDir = [Environment]::GetEnvironmentVariable('HADOOP_CONF_DIR', 'User')
-    $javaHome = [Environment]::GetEnvironmentVariable('JAVA_HOME', 'User')
+    # Use $env:VAR to automatically check Process -> User -> Machine scopes.
+    # This prevents false negatives if the variables were set at the Machine level.
+    $sparkHome = $env:SPARK_HOME
+    $hadoopHome = $env:HADOOP_HOME
+    $hadoopConfDir = $env:HADOOP_CONF_DIR
+    $javaHome = $env:JAVA_HOME
 
     if ([string]::IsNullOrWhiteSpace($sparkHome) -or [string]::IsNullOrWhiteSpace($hadoopHome) -or [string]::IsNullOrWhiteSpace($javaHome)) {
         $errorMsg = "Missing required environment variables. You must install Spark, Hadoop, and Java first."
-        if ([string]::IsNullOrWhiteSpace($javaHome)) { $errorMsg += "`n  - Missing user environment variable: JAVA_HOME" }
-        if ([string]::IsNullOrWhiteSpace($sparkHome)) { $errorMsg += "`n  - Missing user environment variable: SPARK_HOME" }
-        if ([string]::IsNullOrWhiteSpace($hadoopHome)) { $errorMsg += "`n  - Missing user environment variable: HADOOP_HOME" }
+        if ([string]::IsNullOrWhiteSpace($javaHome)) { $errorMsg += "`n  - Missing environment variable: JAVA_HOME" }
+        if ([string]::IsNullOrWhiteSpace($sparkHome)) { $errorMsg += "`n  - Missing environment variable: SPARK_HOME" }
+        if ([string]::IsNullOrWhiteSpace($hadoopHome)) { $errorMsg += "`n  - Missing environment variable: HADOOP_HOME" }
         throw $errorMsg
     }
 
@@ -366,7 +380,7 @@ try {
     Write-Ok "SPARK_HOME  = $sparkHome"
     Write-Ok "HADOOP_HOME = $hadoopHome"
 
-    # Make these available in the current process.
+    # Make these available in the current process explicitly.
     $env:JAVA_HOME = $javaHome
     $env:SPARK_HOME = $sparkHome
     $env:HADOOP_HOME = $hadoopHome
@@ -380,11 +394,18 @@ try {
     if ([string]::IsNullOrWhiteSpace($hadoopConfDir)) {
         $hadoopConfDir = Join-Path $hadoopHome 'etc\hadoop'
         Write-Info "HADOOP_CONF_DIR not set. Defaulting to: $hadoopConfDir"
+        if (-not (Test-Path -LiteralPath $hadoopConfDir -PathType Container)) {
+            Write-Warn "Default HADOOP_CONF_DIR does not exist yet: '$hadoopConfDir'. It will be created."
+        }
         [Environment]::SetEnvironmentVariable('HADOOP_CONF_DIR', $hadoopConfDir, 'User')
+        $env:HADOOP_CONF_DIR = $hadoopConfDir
         Write-Info "Created user environment variable: HADOOP_CONF_DIR = $hadoopConfDir"
     }
     else {
         Write-Info "Using existing HADOOP_CONF_DIR: $hadoopConfDir"
+        if (-not (Test-Path -LiteralPath $hadoopConfDir -PathType Container)) {
+            throw "HADOOP_CONF_DIR exists but is not a valid directory: '$hadoopConfDir'"
+        }
     }
 
     $coreSiteTarget = Copy-ConfigFile -SourceFile $coreSiteSrc -DestinationDir $hadoopConfDir -DestinationFileName 'core-site.xml'
@@ -411,16 +432,20 @@ try {
     Write-Step 'Step 4: Copy CASD cluster token management files'
 
     if ([string]::IsNullOrWhiteSpace($TokenConfTargetDir)) {
-        $installationDir = (Get-Item $sparkHome).Parent.FullName
+        $parentDir = Split-Path $sparkHome -Parent
+        if ([string]::IsNullOrWhiteSpace($parentDir)) {
+            throw "Cannot determine installation directory from SPARK_HOME: '$sparkHome'"
+        }
+        $installationDir = (Get-Item -LiteralPath $parentDir).FullName
         $TokenConfTargetDir = Join-Path $installationDir $tokenConfDirName
     }
 
-    if (Test-Path -Path $TokenConfTargetDir -PathType Container) {
+    if (Test-Path -LiteralPath $TokenConfTargetDir -PathType Container) {
         Write-Info "Using existing cluster token manager configuration directory: $TokenConfTargetDir"
     }
     else {
         Write-Info "The cluster token manager configuration directory does not exist. Creating it now: $TokenConfTargetDir"
-        New-Item -ItemType Directory -Path $TokenConfTargetDir -Force | Out-Null
+        New-Item -ItemType Directory -LiteralPath $TokenConfTargetDir -Force | Out-Null
     }
 
     $pySparkAdapterTarget = Copy-ConfigFile -SourceFile $pySparkAdapterSrc -DestinationDir $TokenConfTargetDir -DestinationFileName $pySparkAdapterName
@@ -441,7 +466,7 @@ try {
     }
     catch {
         Write-Err "Token script execution failed: $($_.Exception.Message)"
-        throw $_
+        throw # Use 'throw' instead of 'throw $_' to preserve the original stack trace
     }
 
     # --------------------------------------------------------------
@@ -488,6 +513,7 @@ try {
 
     Write-Host ''
     Write-Host 'Process environment used by this script:' -ForegroundColor Cyan
+    Write-Host "  JAVA_HOME       = $env:JAVA_HOME"
     Write-Host "  SPARK_HOME      = $env:SPARK_HOME"
     Write-Host "  HADOOP_HOME     = $env:HADOOP_HOME"
     Write-Host "  HADOOP_CONF_DIR = $env:HADOOP_CONF_DIR"
@@ -496,6 +522,7 @@ try {
     Write-Ok 'Hadoop and Spark cluster configuration setup finished successfully.'
 }
 catch {
-    Write-Err $_.Exception.Message
+    $errorMsg = if ($_.Exception.Message) { $_.Exception.Message } else { $_.ToString() }
+    Write-Err $errorMsg
     exit 1
 }
