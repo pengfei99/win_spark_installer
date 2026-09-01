@@ -139,7 +139,7 @@ function Get-SevenZipPath {
         if (Test-Path -LiteralPath $path) { return $path }
     }
 
-    Write-Err "This script requires 7z.exe to unzip the source files."
+    Write-Err "7-Zip not found. Continuing with fallback extraction methods."
 
     return $null
 }
@@ -151,7 +151,12 @@ function ConvertTo-ComparableVersion {
     param([string]$Version)
     if ([string]::IsNullOrWhiteSpace($Version)) { return [Version]::new(0, 0, 0, 0) }
 
-    $parts = @($Version -split '\.' | ForEach-Object { [int]$_ })
+    # Strip BOM, leading/trailing whitespace, and non-numeric suffixes (e.g. -SNAPSHOT)
+    $cleaned = $Version.Trim().TrimStart([char]0xFEFF) -replace '[^0-9\.].*$', ''
+    $parts = @($cleaned -split '\.' | ForEach-Object {
+        $parsed = 0
+        if ([int]::TryParse($_, [ref]$parsed)) { $parsed } else { 0 }
+    })
     if ($parts.Count -gt 4) { $parts = $parts[0..3] }
     while ($parts.Count -lt 4) { $parts += 0 }
 
@@ -357,7 +362,7 @@ function Backup-UserEnvironment {
     $backupDir = Join-Path $InstallRoot 'env-backups'
     New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
 
-    $fileName = "user-env-{0}.txt" -f (Get-Date -Format 'yyyyMMdd-HHmmss')
+    $fileName = "user-env-{0}-{1}.txt" -f (Get-Date -Format 'yyyyMMdd-HHmmss'), [guid]::NewGuid().ToString('N').Substring(0, 8)
     $backupFile = Join-Path $backupDir $fileName
 
     $lines = [Environment]::GetEnvironmentVariables('User').GetEnumerator() | ForEach-Object { "{0}={1}" -f $_.Key, $_.Value } | Sort-Object
@@ -368,12 +373,19 @@ function Backup-UserEnvironment {
 function Refresh-ProcessPath {
     $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    $all = @()
 
-    if ($machinePath) { $all += @($machinePath -split ';' | Where-Object { $_ }) }
-    if ($userPath) { $all += @($userPath -split ';' | Where-Object { $_ }) }
+    # Start from the current process PATH to preserve any process-injected entries
+    # (e.g. shell profile appends, CI runner tool paths).
+    $currentEntries = @($env:Path -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $machineEntries = @($machinePath -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $userEntries = @($userPath -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 
-    $env:Path = ($all -join ';')
+    # Combine machine + user as the authoritative source, then add any process-only entries
+    $known = @{}
+    foreach ($entry in ($machineEntries + $userEntries)) { $known[$entry.TrimEnd([char]'\')] = $true }
+
+    $processOnly = @($currentEntries | Where-Object { -not $known.ContainsKey($_.TrimEnd([char]'\')) })
+    $env:Path = ($machineEntries + $userEntries + $processOnly) -join ';'
 }
 
 function Set-UserEnvironmentVariable {
@@ -462,6 +474,14 @@ function Remove-ManagedEnvironmentVariables {
             Write-Info 'Removed user SPARK_HOME.'
         }
 
+        $hadoopConfDir = [Environment]::GetEnvironmentVariable('HADOOP_CONF_DIR', 'User')
+        if (-not [string]::IsNullOrWhiteSpace($hadoopConfDir)) {
+            if ($CleanAll -or (Test-PathPrefix -Path $hadoopConfDir -Prefix $InstallRoot)) {
+                Remove-UserEnvironmentVariable -Name 'HADOOP_CONF_DIR'
+                Write-Info 'Removed user HADOOP_CONF_DIR.'
+            }
+        }
+
         foreach ($name in @('JAVA_HOME', 'HADOOP_HOME')) {
             $value = [Environment]::GetEnvironmentVariable($name, 'User')
             if ([string]::IsNullOrWhiteSpace($value)) {
@@ -496,6 +516,17 @@ function Remove-ManagedInstallations {
             Write-Warn "Detailed Error: $($_.Exception.Message)"
         } catch {
             Write-Err "An unexpected error occurred while deleting $($dir.FullName): $($_.Exception.Message)"
+        }
+    }
+
+    # Also clean up leftover .tmp_* staging directories from crashed runs.
+    $tmpDirs = @(Get-ChildItem -LiteralPath $InstallRoot -Directory -Filter '.tmp_*' -ErrorAction SilentlyContinue)
+    foreach ($tmpDir in $tmpDirs) {
+        Write-Info "Removing leftover temp directory: $($tmpDir.FullName)"
+        try {
+            Remove-Item -LiteralPath $tmpDir.FullName -Recurse -Force -ErrorAction Stop
+        } catch {
+            Write-Warn "Could not delete '$($tmpDir.FullName)': $($_.Exception.Message)"
         }
     }
 }
@@ -630,8 +661,26 @@ function Expand-ZipToManagedFolder {
             $sourceDir = $items[0].FullName
         } else {
             $binFolders = @(Get-ChildItem -LiteralPath $tempDir -Filter 'bin' -Directory -Recurse -Depth 2 -Force)
-            if ($binFolders.Count -gt 0) {
+            if ($binFolders.Count -eq 1) {
                 $sourceDir = Split-Path $binFolders[0].FullName -Parent
+            } elseif ($binFolders.Count -gt 1) {
+                # Try to pick the bin folder containing expected executables based on package type.
+                $expectedExe = $null
+                if ($TargetFolderName -match '^jdk-')     { $expectedExe = 'java.exe' }
+                elseif ($TargetFolderName -match '^hadoop-') { $expectedExe = 'hadoop.cmd' }
+                elseif ($TargetFolderName -match '^spark-')  { $expectedExe = 'spark-submit.cmd' }
+
+                $bestBin = $null
+                if ($expectedExe) {
+                    foreach ($binDir in $binFolders) {
+                        if (Test-Path -LiteralPath (Join-Path $binDir.FullName $expectedExe)) {
+                            $bestBin = $binDir
+                            break
+                        }
+                    }
+                }
+                if (-not $bestBin) { $bestBin = $binFolders[0] }
+                $sourceDir = Split-Path $bestBin.FullName -Parent
             }
         }
 
@@ -686,7 +735,7 @@ if ($sparkPackages.Count -eq 0) {
 Write-Step 'Step 2: Select Spark version'
 
 $selectedSpark = $null
-$targetVersionPattern = '^\d+(\.\d+){1,3}$'
+$targetVersionPattern = '^\d+(\.\d+){0,3}$'
 
 if (-not [string]::IsNullOrWhiteSpace($TargetSparkVersion)) {
     $TargetSparkVersion = $TargetSparkVersion.Trim()
@@ -698,7 +747,11 @@ if (-not [string]::IsNullOrWhiteSpace($TargetSparkVersion)) {
     }
 
     Write-Info "Target Spark version supplied by parameter: $TargetSparkVersion"
+    # Prefer exact match, otherwise resolve a prefix (e.g. '4' or '3.5') to the highest matching package.
     $selectedSpark = @($sparkPackages | Where-Object { $_.Version -eq $TargetSparkVersion }) | Select-Object -First 1
+    if (-not $selectedSpark) {
+        $selectedSpark = @($sparkPackages | Where-Object { Test-VersionPrefix -Version $_.Version -Prefix $TargetSparkVersion } | Sort-Object -Property @{ Expression = { ConvertTo-ComparableVersion $_.Version }; Descending = $true }) | Select-Object -First 1
+    }
 
     if (-not $selectedSpark) {
         Write-Err "Spark version '$TargetSparkVersion' was not found in '$_sparkSrcDir'."
@@ -754,12 +807,20 @@ if ($installedSpark) {
     Write-Info "Existing Spark path    : $( $installedSpark.Path )"
     Write-Info "Existing Spark version : $( $installedSpark.Version )"
 
-    if ($installedSpark.Version -eq $selectedSpark.Version) {
-        $reinstall = Confirm-Choice -Message "Spark $( $selectedSpark.Version ) is already installed. Do you want to reinstall it?" -Default 'N'
-        if (-not $reinstall) { Write-Info 'Reinstallation cancelled. No changes were made.'; exit 0 }
+    if (-not [string]::IsNullOrWhiteSpace($TargetSparkVersion)) {
+        if ($installedSpark.Version -eq $selectedSpark.Version) {
+            Write-Info "Spark $( $selectedSpark.Version ) is already installed. Proceeding with reinstall (headless mode)."
+        } else {
+            Write-Info "Replacing Spark $( $installedSpark.Version ) with $( $selectedSpark.Version ) (headless mode)."
+        }
     } else {
-        $replace = Confirm-Choice -Message "Installed Spark version is '$( $installedSpark.Version )', selected version is '$( $selectedSpark.Version )'. Replace existing installation?" -Default 'Y'
-        if (-not $replace) { Write-Info 'Installation cancelled. No changes were made.'; exit 0 }
+        if ($installedSpark.Version -eq $selectedSpark.Version) {
+            $reinstall = Confirm-Choice -Message "Spark $( $selectedSpark.Version ) is already installed. Do you want to reinstall it?" -Default 'N'
+            if (-not $reinstall) { Write-Info 'Reinstallation cancelled. No changes were made.'; exit 0 }
+        } else {
+            $replace = Confirm-Choice -Message "Installed Spark version is '$( $installedSpark.Version )', selected version is '$( $selectedSpark.Version )'. Replace existing installation?" -Default 'Y'
+            if (-not $replace) { Write-Info 'Installation cancelled. No changes were made.'; exit 0 }
+        }
     }
 } else {
     Write-Info 'No existing Spark installation was detected in the managed install root.'
@@ -770,9 +831,15 @@ if ($installedSpark) {
 }
 
 # Capture old user environment values before cleaning.
-$oldJavaHome   = [Environment]::GetEnvironmentVariable('JAVA_HOME', 'User')
-$oldHadoopHome = [Environment]::GetEnvironmentVariable('HADOOP_HOME', 'User')
-$oldSparkHome  = [Environment]::GetEnvironmentVariable('SPARK_HOME', 'User')
+$oldJavaHome     = [Environment]::GetEnvironmentVariable('JAVA_HOME', 'User')
+$oldHadoopHome   = [Environment]::GetEnvironmentVariable('HADOOP_HOME', 'User')
+$oldHadoopConfDir = [Environment]::GetEnvironmentVariable('HADOOP_CONF_DIR', 'User')
+$oldSparkHome    = [Environment]::GetEnvironmentVariable('SPARK_HOME', 'User')
+
+# Initialize variables to avoid StrictMode errors in the catch block if an exception occurs before they are assigned.
+$javaHome = $null
+$hadoopHome = $null
+$sparkHome = $null
 
 try {
     # ------------------------------------------------------------------
@@ -810,25 +877,26 @@ try {
     Remove-ManagedEnvironmentVariables -InstallRoot $InstallRoot -CleanAll:$CleanAllRelatedUserVariables
     Remove-PathVariablePrefix -Prefix $InstallRoot
 
-    # Build exact path removals cleanly without overwriting the array
-    $exactPathRemovals = @(
-        '%JAVA_HOME%\bin',
-        '%HADOOP_HOME%\bin',
-        '%SPARK_HOME%\bin'
-    )
-
-    if (-not [string]::IsNullOrWhiteSpace($oldSparkHome)) {
-        $exactPathRemovals += Join-Path $oldSparkHome 'bin'
-    }
+    # Build exact path removals cleanly without overwriting the array.
+    # Only remove %VAR%\bin literals when the variable is managed (points under $InstallRoot) or -CleanAllRelatedUserVariables is set.
+    $exactPathRemovals = @()
 
     if ($CleanAllRelatedUserVariables) {
+        $exactPathRemovals += '%JAVA_HOME%\bin', '%HADOOP_HOME%\bin', '%SPARK_HOME%\bin'
+        if (-not [string]::IsNullOrWhiteSpace($oldSparkHome)) { $exactPathRemovals += Join-Path $oldSparkHome 'bin' }
         if (-not [string]::IsNullOrWhiteSpace($oldJavaHome)) { $exactPathRemovals += Join-Path $oldJavaHome 'bin' }
         if (-not [string]::IsNullOrWhiteSpace($oldHadoopHome)) { $exactPathRemovals += Join-Path $oldHadoopHome 'bin' }
     } else {
+        if (-not [string]::IsNullOrWhiteSpace($oldSparkHome) -and (Test-PathPrefix -Path $oldSparkHome -Prefix $InstallRoot)) {
+            $exactPathRemovals += '%SPARK_HOME%\bin'
+            $exactPathRemovals += Join-Path $oldSparkHome 'bin'
+        }
         if (-not [string]::IsNullOrWhiteSpace($oldJavaHome) -and (Test-PathPrefix -Path $oldJavaHome -Prefix $InstallRoot)) {
+            $exactPathRemovals += '%JAVA_HOME%\bin'
             $exactPathRemovals += Join-Path $oldJavaHome 'bin'
         }
         if (-not [string]::IsNullOrWhiteSpace($oldHadoopHome) -and (Test-PathPrefix -Path $oldHadoopHome -Prefix $InstallRoot)) {
+            $exactPathRemovals += '%HADOOP_HOME%\bin'
             $exactPathRemovals += Join-Path $oldHadoopHome 'bin'
         }
     }
@@ -872,6 +940,9 @@ try {
 
     # set hadoop conf dir for spark cluster mode
     $hadoopConfDir = Join-Path $hadoopHome 'etc\hadoop'
+    if (-not (Test-Path -LiteralPath $hadoopConfDir)) {
+        throw "HADOOP_CONF_DIR '$hadoopConfDir' does not exist. The Hadoop zip layout may be unexpected."
+    }
 
     Set-UserEnvironmentVariable -Name 'JAVA_HOME'       -Value $javaHome
     Set-UserEnvironmentVariable -Name 'HADOOP_HOME'     -Value $hadoopHome
@@ -899,5 +970,39 @@ try {
 } catch {
     Write-Err ("Installation failed: {0}" -f $_.Exception.Message)
     if ($_.ScriptStackTrace) { Write-Err $_.ScriptStackTrace }
+
+    # Rollback: restore old environment variables if they were set
+    Write-Warn 'Attempting rollback of environment variables...'
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($oldJavaHome)) {
+            Set-UserEnvironmentVariable -Name 'JAVA_HOME' -Value $oldJavaHome
+        }
+        if (-not [string]::IsNullOrWhiteSpace($oldHadoopHome)) {
+            Set-UserEnvironmentVariable -Name 'HADOOP_HOME' -Value $oldHadoopHome
+        }
+        if (-not [string]::IsNullOrWhiteSpace($oldHadoopConfDir)) {
+            Set-UserEnvironmentVariable -Name 'HADOOP_CONF_DIR' -Value $oldHadoopConfDir
+        }
+        if (-not [string]::IsNullOrWhiteSpace($oldSparkHome)) {
+            Set-UserEnvironmentVariable -Name 'SPARK_HOME' -Value $oldSparkHome
+        }
+        Refresh-ProcessPath
+        Write-Info 'Environment variables restored from pre-installation snapshot.'
+    } catch {
+        Write-Warn "Could not restore environment variables: $($_.Exception.Message)"
+    }
+
+    # Clean up partially-extracted directories that may have been created
+    foreach ($partialDir in @($javaHome, $hadoopHome, $sparkHome)) {
+        if ($partialDir -and (Test-Path -LiteralPath $partialDir)) {
+            try {
+                Remove-Item -LiteralPath $partialDir -Recurse -Force -ErrorAction Stop
+                Write-Info "Cleaned up partially-extracted directory: $partialDir"
+            } catch {
+                Write-Warn "Could not clean up '$partialDir': $($_.Exception.Message)"
+            }
+        }
+    }
+
     exit 1
 }
