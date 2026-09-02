@@ -48,12 +48,6 @@ def _expand_path(value: str) -> str:
     return os.path.expandvars(os.path.expanduser(value))
 
 
-def _safe_username() -> str:
-    """Return a filesystem-safe username for staging paths."""
-    name = os.environ.get("USERNAME") or os.environ.get("USER") or "default"
-    return "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in name)
-
-
 def _to_port(value: Any, field_name: str) -> int:
     """Validate and convert a port value."""
     try:
@@ -372,11 +366,6 @@ def get_spark(
             "spark.security.credentials.hive.enabled": "false",
             "spark.security.credentials.hbase.enabled": "false",
         }
-
-        if master == "yarn":
-            staging_root = cfg.get("StagingDir") or "/tmp"
-            staging_dir = Path(_expand_path(staging_root)) / _safe_username()
-            base_conf["spark.yarn.stagingDir"] = staging_dir.as_posix()
 
         port_source: Any = driver_port
 

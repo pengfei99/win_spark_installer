@@ -432,7 +432,7 @@ get_casd_conf <- function() {
 # =====================================================================
 #' @return The normalized file path to the generated token.
 #' @noRd
-generate_casd_token <- function() {
+generate_casd_token <- function(timeout = CASD_DEFAULT_TIMEOUT) {
   # Load CASD configuration from registry.
   cf <- get_casd_conf()
 

@@ -111,6 +111,86 @@ function ConvertTo-PowerShellSingleQuotedString {
     return "'" + ($Value -replace "'", "''") + "'"
 }
 
+function Protect-TokenDirectory {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DirectoryPath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($DirectoryPath)) {
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $DirectoryPath -PathType Container)) {
+        New-Item -ItemType Directory -Path $DirectoryPath -Force | Out-Null
+    }
+
+    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+
+    try {
+        $dirInfo = New-Object System.IO.DirectoryInfo($DirectoryPath)
+
+        # IMPORTANT:
+        # Only get the DACL / Access section.
+        # Do NOT touch Audit/SACL because that requires SeSecurityPrivilege.
+        $acl = $dirInfo.GetAccessControl(
+            [System.Security.AccessControl.AccessControlSections]::Access
+        )
+
+        # Disable inheritance and remove inherited rules
+        $acl.SetAccessRuleProtection($true, $false)
+
+        # Remove all explicit access rules
+        $existingRules = @(
+            $acl.GetAccessRules(
+                $true,
+                $true,
+                [System.Security.Principal.NTAccount]
+            )
+        )
+
+        foreach ($rule in $existingRules) {
+            [void]$acl.RemoveAccessRule($rule)
+        }
+
+        $rights = [System.Security.AccessControl.FileSystemRights]::FullControl
+        $allow  = [System.Security.AccessControl.AccessControlType]::Allow
+
+        $inheritFlags = `
+            [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor `
+            [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+
+        $propagationFlags = [System.Security.AccessControl.PropagationFlags]::None
+
+        $userRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+            $currentUser,
+            $rights,
+            $inheritFlags,
+            $propagationFlags,
+            $allow
+        )
+
+        $systemRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+            "NT AUTHORITY\SYSTEM",
+            $rights,
+            $inheritFlags,
+            $propagationFlags,
+            $allow
+        )
+
+        [void]$acl.AddAccessRule($userRule)
+        [void]$acl.AddAccessRule($systemRule)
+
+        # Apply only DACL/access permissions
+        $dirInfo.SetAccessControl($acl)
+
+        Write-Verbose "Secured token directory ACL: $DirectoryPath"
+    }
+    catch {
+        Write-Warning "Failed to set ACLs on token directory '$DirectoryPath'. Error: $($_.Exception.Message)"
+    }
+}
+
 #endregion Helper functions
 
 
@@ -159,37 +239,7 @@ if (-not (Test-Path -LiteralPath $tokenDir -PathType Container)) {
 # Lock down the token directory
 # ------------------------------------------------------------------------------
 
-$currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-$acl = Get-Acl -LiteralPath $tokenDir
-
-# Disable inheritance and remove inherited permissions.
-# 1st arg: is protected or not
-# 2nd arg: preserve inheritance or not
-$acl.SetAccessRuleProtection($true, $false)
-
-# Remove existing explicit access rules.
-foreach ($rule in @($acl.Access)) {
-    $null = $acl.RemoveAccessRule($rule)
-}
-
-$userRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-    $currentUser, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow"
-)
-
-$systemRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-    "NT AUTHORITY\SYSTEM", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow"
-)
-
-$acl.AddAccessRule($userRule)
-$acl.AddAccessRule($systemRule)
-
-try {
-    Set-Acl -LiteralPath $tokenDir -AclObject $acl -ErrorAction Stop
-    Write-Verbose "Hardened NTFS ACLs on: $tokenDir"
-}
-catch {
-    Write-Warning "Failed to set ACLs on $tokenDir. You may need to run as Administrator. Error: $_"
-}
+Protect-TokenDirectory -DirectoryPath $tokenDir
 
 #endregion 1
 
@@ -324,7 +374,7 @@ function global:spark-submit {
         `$localExitCode = `$LASTEXITCODE
     }
     catch {
-        Write-Error "Failed to execute spark-submit: `$_"
+        Write-Error "Failed to execute spark-submit: `$$_"
         `$localExitCode = 1
     }
     finally {
