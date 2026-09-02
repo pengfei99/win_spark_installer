@@ -1,1 +1,60 @@
-v1
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<configuration>
+   <!-- HDFS permissions -->
+    <property>
+        <name>dfs.permissions.enabled</name>
+        <value>true</value>
+    </property>
+
+    <!-- NameNode Kerberos identity -->
+    <property>
+        <name>dfs.namenode.kerberos.principal</name>
+        <value>hdfs/d1mutua-m01.casd.fr@CASD.FR</value>
+    </property>
+
+    <!-- SPNEGO authentication for Web UI -->
+    <property>
+        <name>dfs.web.authentication.kerberos.principal</name>
+        <value>HTTP/d1mutua-m01.casd.fr@CASD.FR</value>
+    </property>
+
+    <!-- SASL encryption for block transfer -->
+    <property>
+        <name>dfs.data.transfer.protection</name>
+        <value>authentication</value>
+    </property>
+
+    <!-- Non privileged ports -->
+    <property>
+        <name>dfs.https.port</name>
+        <value>50470</value>
+    </property>
+
+    <property>
+        <name>dfs.secondary.https.port</name>
+        <value>50490</value>
+        <description>Port HTTPS pour le secondary-namenode.</description>
+    </property>
+    <property>
+        <name>dfs.https.address</name>
+        <value>d1mutua-m01.casd.fr:50470</value>
+        <description>Adresse HTTPS d’écoute du Namenode.</description>
+    </property>
+    <property>
+        <name>dfs.encrypt.data.transfer</name>
+        <value>true</value>
+    </property>
+
+    <!-- Explicitly force HTTP -->
+    <property>
+        <name>dfs.http.policy</name>
+        <value>HTTPS_ONLY</value>
+</property>
+<!-- Superuser group -->
+    <property>
+        <name>dfs.permissions.superusergroup</name>
+        <value>hadoop</value>
+    </property>
+
+</configuration>

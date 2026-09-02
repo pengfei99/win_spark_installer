@@ -1,1 +1,38 @@
-v1
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+
+<configuration>
+    <property>
+        <name>fs.defaultFS</name>
+        <value>hdfs://d1mutua-m01.casd.fr:9000</value>
+    </property>
+<!-- Enable hadoop kerberos authentication -->
+    <property>
+        <name>hadoop.security.authentication</name>
+        <value>kerberos</value>
+    </property>
+
+    <property>
+        <name>hadoop.security.authorization</name>
+        <value>true</value>
+    </property>
+
+    <property>
+        <name>hadoop.security.native.lib</name>
+        <value>true</value>
+    </property>
+
+    <!-- Group resolution via OS / SSSD -->
+    <property>
+        <name>hadoop.security.group.mapping</name>
+        <value>org.apache.hadoop.security.JniBasedUnixGroupsMappingWithFallback</value>
+    </property>
+    <!-- AD principal → local user mapping -->
+    <property>
+        <name>hadoop.security.auth_to_local</name>
+        <value>
+            RULE:[2:$1@$0](.*@CASD\.FR)s/@CASD\.FR// RULE:[1:$1] DEFAULT
+        </value>
+        <description>Mapping du principal Kerberos vers le nom d’utilisateur local.</description>
+</property>
+</configuration>
