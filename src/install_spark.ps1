@@ -63,7 +63,7 @@ if ([string]::IsNullOrWhiteSpace($_sparkSrcDir)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
-    $InstallRoot = Join-Path $env:LOCALAPPDATA 'installed-spark'
+    $InstallRoot = Join-Path $env:LOCALAPPDATA 'casd-tools'
 }
 
 # ------------------------------------------------------------------

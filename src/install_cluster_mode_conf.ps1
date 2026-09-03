@@ -28,8 +28,8 @@
     Expected token management files (inside casd-token-conf folder):
      - install-tokens.ps1
      - refresh-tokens.ps1
-     - casd-spark.py
-     - casd-spark.R
+     - casd_spark.py
+     - casd_spark.R
      - token-convertor.jar
 
 .NOTES
@@ -72,9 +72,9 @@ Set-StrictMode -Version Latest
 # Default token manager conf file names
 # ------------------------------------------------------------------
 $tokenConfDirName = 'casd-token-conf'
-$pySparkAdapterName = "casd-spark.py"
-$sparkLyrAdapterName = "casd-spark.R"
-$tokenConvertorName = "token-convertor.jar"
+$pySparkAdapterName = "casd_spark.py"
+$sparkLyrAdapterName = "casd_spark.R"
+$tokenConvertorName = "make-creds-file-1.0.0-SNAPSHOT.jar"
 $installTokenScriptName = "install-tokens.ps1"
 $refreshTokenScriptName = "refresh-tokens.ps1"
 
@@ -311,7 +311,9 @@ function Test-HadoopCommand {
         }
     }
     catch {
-        Write-Warn "$Description execution failed: $($_.Exception.Message)"
+        $errMsg = "Unknown execution error"
+        if ($Error.Count -gt 0 -and $Error[0].Exception) { $errMsg = $Error[0].Exception.Message}
+        Write-Warn "$Description execution failed: $errMsg"
         return $false
     }
 }
@@ -445,7 +447,7 @@ try {
     }
     else {
         Write-Info "The cluster token manager configuration directory does not exist. Creating it now: $TokenConfTargetDir"
-        New-Item -ItemType Directory -LiteralPath $TokenConfTargetDir -Force | Out-Null
+        New-Item -ItemType Directory -Path $TokenConfTargetDir -Force | Out-Null
     }
 
     $pySparkAdapterTarget = Copy-ConfigFile -SourceFile $pySparkAdapterSrc -DestinationDir $TokenConfTargetDir -DestinationFileName $pySparkAdapterName
@@ -465,8 +467,10 @@ try {
         Write-Ok "Token setup script completed successfully."
     }
     catch {
-        Write-Err "Token script execution failed: $($_.Exception.Message)"
-        throw # Use 'throw' instead of 'throw $_' to preserve the original stack trace
+        $errMsg = "Unknown execution error"
+        if ($Error.Count -gt 0 -and $Error[0].Exception) { $errMsg = $Error[0].Exception.Message}
+        Write-Err "Token script execution failed: $errMsg"
+        throw
     }
 
     # --------------------------------------------------------------
@@ -522,7 +526,8 @@ try {
     Write-Ok 'Hadoop and Spark cluster configuration setup finished successfully.'
 }
 catch {
-    $errorMsg = if ($_.Exception.Message) { $_.Exception.Message } else { $_.ToString() }
+    $errMsg = "Unknown execution error"
+    if ($Error.Count -gt 0 -and $Error[0].Exception) { $errMsg = $Error[0].Exception.Message}
     Write-Err $errorMsg
     exit 1
 }

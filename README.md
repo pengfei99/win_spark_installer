@@ -18,3 +18,12 @@ This project contains two main powershell scripts:
 2. Check if the installation is successes. Run pyspark or sparklyr jobs.
 3. Run `install_cluster_mode_conf.ps1`
 4. Check hdfs cluster accessibility via `hdfs dfs -ls /`
+
+
+## Notes
+
+The name of the pyspark and sparklyr adapter must be:
+- `casd_spark.py`
+- `casd_spark.R`
+
+Because the python module naming convention does not allow `-` in the name
