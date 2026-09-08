@@ -299,7 +299,7 @@ spark.stop()
 current_user <- Sys.info()[["user"]]
 message(sprintf("Running Spark session for OS User: %s", current_user))
 
-# Construct dynamic local configuration path
+# Construct CASD sparklyr wrapper path
 casd_conf_path <- file.path(
   "C:", "Users", current_user, "AppData", "Local", 
    "casd-tools", "casd-token-conf", "casd_spark.R"
@@ -360,8 +360,7 @@ raw_tbl <- spark_read_csv(
   name         = "raw_population",
   path         = hdfs_csv_path,
   header       = TRUE,
-  infer_schema = FALSE, # BEST PRACTICE: Set FALSE on large datasets to avoid a redundant HDFS scan
-  columns      = c(age = "double", sex = "string"), # Explicit schema enforcement
+  infer_schema = TRUE, # BEST PRACTICE: Set FALSE on large datasets to avoid a redundant HDFS scan
   memory       = FALSE, # Keep lazy off-heap until explicitly requested
   overwrite    = TRUE
 )
@@ -425,6 +424,9 @@ results <- summary_tbl %>% collect()
 
 message("--- Final Aggregated Results ---")
 print(results)
+
+# close the spark session and free the resources
+casd_spark_disconnect(sc)
 ```
 
 
