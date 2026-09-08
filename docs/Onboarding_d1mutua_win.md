@@ -247,66 +247,50 @@ if CASD_LIB_PATH.exists():
     sys.path.append(str(CASD_LIB_PATH))
 else:
     print(f"[WARNING] Custom library path does not exist: {CASD_LIB_PATH}")
-
+# import casd spark wrapper
 from casd_spark import get_spark
 
-
+# get user name
 username = getpass.getuser()
+# set spark job name
 app_name = f"test_pyspark_for_{username}"
 
 # Build HDFS paths using pathlib logic for safety
-base_user_dir = Path("/users") / username
-src_data_path = f"hdfs://{base_user_dir / 'stats.csv'}"
-csv_out_path = f"hdfs://{base_user_dir / 'tmp' / 'count_resu_csv'}"
-parquet_out_path = f"hdfs://{base_user_dir / 'tmp' / 'count_resu_parquet'}"
+base_user_dir = f"/users/{username}"
+src_data_path = f"hdfs://{base_user_dir}/stats.csv"
+csv_out_path = f"hdfs://{base_user_dir}/tmp/count_resu_csv"
+parquet_out_path = f"hdfs://{base_user_dir}/tmp/count_resu_parquet"
 
 print(f"[INFO] Initializing Spark Session: {app_name}")
 spark = get_spark(app_name=app_name)
 
 
-try:
-        print(f"[INFO] Reading source dataset from {src_data_path}")
-        src_df = spark.read.csv(
-            src_data_path,
-            header=True,
-            inferSchema=True
-        )
 
-        print("[INFO] Source Schema:")
-        src_df.printSchema()
+print(f"[INFO] Reading source dataset from {src_data_path}")
+src_df = spark.read.csv(src_data_path,header=True,inferSchema=True)
+src_df.show()
 
-        # Compute counts by sex
-        print("[INFO] Computing aggregation: count_by_sex")
-        count_by_sex = src_df.groupBy("sex").count()
+print("[INFO] Source Schema:")
+src_df.printSchema()
 
-        # Save to CSV
-        print(f"[INFO] Writing CSV output to {csv_out_path}")
-        (
-            count_by_sex.write
-            .mode("overwrite")
-            .option("header", "true")
-            .csv(csv_out_path)
-        )
+# Compute counts by sex
+print("[INFO] Computing aggregation: count_by_sex")
+count_by_sex = src_df.groupBy("sex").count()
 
-        # Save to Parquet
-        print(f"[INFO] Writing Parquet output to {parquet_out_path}")
-        (
-            count_by_sex.write
-            .mode("overwrite")
-            .parquet(parquet_out_path)
-        )
+# Save to CSV
+print(f"[INFO] Writing CSV output to {csv_out_path}")
+count_by_sex.write.mode("overwrite").option("header", "true").csv(csv_out_path)
 
-        print("[INFO] Pipeline completed successfully.")
+# Save to Parquet
+print(f"[INFO] Writing Parquet output to {parquet_out_path}")
+count_by_sex.write.mode("overwrite").parquet(parquet_out_path)
 
-    except Exception as error:
-        print(f"[ERROR] Pipeline execution failed: {error}")
-        raise
+print("[INFO] Pipeline completed successfully.")
 
-    finally:
-        # Guaranteed cleanup step without a context manager
-        print("[INFO] Stopping Spark session...")
-        spark.stop()
 
+# Guaranteed cleanup step without a context manager
+print("[INFO] Stopping Spark session...")
+spark.stop()
 ```
 ### 6.3 Use spark cluster in interactive mode(sparklyr)
 
@@ -318,7 +302,7 @@ message(sprintf("Running Spark session for OS User: %s", current_user))
 # Construct dynamic local configuration path
 casd_conf_path <- file.path(
   "C:", "Users", current_user, "AppData", "Local", 
-   "casd-tools", "casd_spark_conf", "casd_spark.R"
+   "casd-tools", "casd-token-conf", "casd_spark.R"
 )
 
 if (file.exists(casd_conf_path)) {
