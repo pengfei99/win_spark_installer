@@ -74,6 +74,7 @@ if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
 # HadoopVersionPrefixes uses prefix matching:
 #   '3.3' matches 3.3.6
 #   '3.4' matches 3.4.3
+# If multiple version exists for 3.3, choose the latest. for example, if 3.3.5 and 3.3.6 both exist, choose 3.3.6.
 #
 # JavaMajorVersions matches the JDK major version:
 #   jdk-11.0.30.zip -> major version 11
@@ -235,7 +236,7 @@ function Get-SparkDependencyRule {
     return $null
 }
 
-function Select-EligibleJava {
+function GetCorrectJava {
     param($JavaPackages, [string[]]$RequiredMajors)
     $eligible = @($JavaPackages | Where-Object { $RequiredMajors -contains $_.Major } | Sort-Object -Property @{ Expression = { ConvertTo-ComparableVersion $_.Version }; Descending = $true })
 
@@ -247,7 +248,7 @@ function Select-EligibleJava {
     }
 }
 
-function Select-EligibleHadoop {
+function GetCorrectHdp {
     param($HadoopPackages, [string[]]$RequiredPrefixes)
     $eligible = @($HadoopPackages | Where-Object {
         $pkg = $_
@@ -777,8 +778,8 @@ if (-not $dependencyRule) {
     exit 1
 }
 
-$selectedJava = Select-EligibleJava -JavaPackages $javaPackages -RequiredMajors $dependencyRule.JavaMajorVersions
-$selectedHadoop = Select-EligibleHadoop -HadoopPackages $hadoopPackages -RequiredPrefixes $dependencyRule.HadoopVersionPrefixes
+$selectedJava = GetCorrectJava -JavaPackages $javaPackages -RequiredMajors $dependencyRule.JavaMajorVersions
+$selectedHadoop = GetCorrectHdp -HadoopPackages $hadoopPackages -RequiredPrefixes $dependencyRule.HadoopVersionPrefixes
 
 $missing = @()
 if (-not $selectedJava) {
@@ -814,11 +815,12 @@ if ($installedSpark) {
             Write-Info "Replacing Spark $( $installedSpark.Version ) with $( $selectedSpark.Version ) (headless mode)."
         }
     } else {
+        $installWarnMsg = "If you choose yes, the old spark installation and configuration(e.g. cluster access configuration) will be forever deleted. You need to rerun the cluster configuration script to access the cluster again."
         if ($installedSpark.Version -eq $selectedSpark.Version) {
-            $reinstall = Confirm-Choice -Message "Spark $( $selectedSpark.Version ) is already installed. Do you want to reinstall it?" -Default 'N'
+            $reinstall = Confirm-Choice -Message "Spark $( $selectedSpark.Version ) is already installed. Do you want to reinstall it? $installWarnMsg" -Default 'N'
             if (-not $reinstall) { Write-Info 'Reinstallation cancelled. No changes were made.'; exit 0 }
         } else {
-            $replace = Confirm-Choice -Message "Installed Spark version is '$( $installedSpark.Version )', selected version is '$( $selectedSpark.Version )'. Replace existing installation?" -Default 'Y'
+            $replace = Confirm-Choice -Message "Installed Spark version is '$( $installedSpark.Version )', selected version is '$( $selectedSpark.Version )'. Replace existing installation? $installWarnMsg" -Default 'Y'
             if (-not $replace) { Write-Info 'Installation cancelled. No changes were made.'; exit 0 }
         }
     }
