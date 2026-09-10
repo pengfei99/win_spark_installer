@@ -24,10 +24,10 @@
 # Script Configuration
 [CmdletBinding()]
 param(
-    [string]$_toolsSrcDir,
-    [string]$_javaSrcDir,
-    [string]$_hadoopSrcDir,
-    [string]$_sparkSrcDir,
+    [string]$_toolsSrcDir = "S:\ds",
+    [string]$_javaSrcDir = "S:\ds\java",
+    [string]$_hadoopSrcDir = "S:\ds\hadoop",
+    [string]$_sparkSrcDir = "S:\ds\spark",
     [string]$InstallRoot,
 
 # If specified, also removes user JAVA_HOME/HADOOP_HOME even if they do not point under $InstallRoot.
@@ -44,27 +44,90 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 # ------------------------------------------------------------------
-# Determine default source file paths
+# Console helpers
 # ------------------------------------------------------------------
-if ( [string]::IsNullOrWhiteSpace($_toolsSrcDir))
+function Write-Info
+{
+    param([string]$Message)
+    Write-Host "[INFO] $Message" -ForegroundColor Cyan
+}
+
+function Write-Ok
+{
+    param([string]$Message)
+    Write-Host "[OK] $Message" -ForegroundColor Green
+}
+
+function Write-Warn
+{
+    param([string]$Message)
+    Write-Host "[WARN] $Message" -ForegroundColor Yellow
+}
+
+function Write-Err
+{
+    param([string]$Message)
+    Write-Host "[ERROR] $Message" -ForegroundColor Red
+}
+
+function Write-Step
+{
+    param([string]$Message)
+    Write-Host "`n==> $Message" -ForegroundColor Magenta
+}
+
+# ------------------------------------------------------------------
+# Determine source file paths
+# ------------------------------------------------------------------
+# get tools root dir
+if (-not [string]::IsNullOrWhiteSpace($_toolsSrcDir) -and
+        (Test-Path -Path $_toolsSrcDir -PathType Container))
+{
+    Write-Info "Using tools src dir: $_toolsSrcDir"
+}
+else
 {
     $_toolsSrcDir = Join-Path $PSScriptRoot 'tools'
+    Write-Info "Using tools src dir from current directory: $_toolsSrcDir"
 }
 
-if ( [string]::IsNullOrWhiteSpace($_javaSrcDir))
+
+# get java root dir
+if (-not [string]::IsNullOrWhiteSpace($_javaSrcDir) -and
+        (Test-Path -Path $_javaSrcDir -PathType Container))
+{
+    Write-Info "Using java src dir: $_javaSrcDir"
+}
+else
 {
     $_javaSrcDir = Join-Path $_toolsSrcDir 'java'
+    Write-Info "Using java src dir from current directory: $_javaSrcDir"
 }
 
-if ( [string]::IsNullOrWhiteSpace($_hadoopSrcDir))
+# get hdp root dir
+if (-not [string]::IsNullOrWhiteSpace($_hadoopSrcDir) -and
+        (Test-Path -Path $_hadoopSrcDir -PathType Container))
+{
+    Write-Info "Using hadoop src dir: $_hadoopSrcDir"
+}
+else
 {
     $_hadoopSrcDir = Join-Path $_toolsSrcDir 'hadoop'
+    Write-Info "Using hadoop src dir from current directory: $_hadoopSrcDir"
 }
 
-if ( [string]::IsNullOrWhiteSpace($_sparkSrcDir))
+# get spark root dir
+if (-not [string]::IsNullOrWhiteSpace($_sparkSrcDir) -and
+        (Test-Path -Path $_sparkSrcDir -PathType Container))
+{
+    Write-Info "Using spark src dir: $_sparkSrcDir"
+}
+else
 {
     $_sparkSrcDir = Join-Path $_toolsSrcDir 'spark'
+    Write-Info "Using spark src dir from current directory: $_sparkSrcDir"
 }
+
 
 if ( [string]::IsNullOrWhiteSpace($InstallRoot))
 {
@@ -99,38 +162,7 @@ $SparkDMap = @{
     '4.2' = @{ JMajVer = @('17', '21'); HdpVer = @('3.5') }
 }
 
-# ------------------------------------------------------------------
-# Console helpers
-# ------------------------------------------------------------------
-function Write-Info
-{
-    param([string]$Message)
-    Write-Host "[INFO] $Message" -ForegroundColor Cyan
-}
 
-function Write-Ok
-{
-    param([string]$Message)
-    Write-Host "[OK] $Message" -ForegroundColor Green
-}
-
-function Write-Warn
-{
-    param([string]$Message)
-    Write-Host "[WARN] $Message" -ForegroundColor Yellow
-}
-
-function Write-Err
-{
-    param([string]$Message)
-    Write-Host "[ERROR] $Message" -ForegroundColor Red
-}
-
-function Write-Step
-{
-    param([string]$Message)
-    Write-Host "`n==> $Message" -ForegroundColor Magenta
-}
 
 # ------------------------------------------------------------------
 # Get 7-Zip path helper
@@ -488,14 +520,18 @@ function Get-InstalledSpark
     {
         return $null
     }
-    return @($found | Sort-Object -Property @{ Expression = { if ($_.Version)
-    {
-        ConvertTo-ComparableVersion $_.Version
-    }
-    else
-    {
-        ConvertTo-ComparableVersion '0'
-    } }; Descending = $true })[0]
+    return @($found | Sort-Object -Property @{
+        Expression = {
+            if ($_.Version)
+            {
+                ConvertTo-ComparableVersion $_.Version
+            }
+            else
+            {
+                ConvertTo-ComparableVersion '0'
+            }
+        }; Descending = $true
+    })[0]
 }
 
 # ------------------------------------------------------------------
