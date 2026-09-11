@@ -15,61 +15,17 @@
        cluster nodes.
 
 .PARAMETER NameNodeWeb
-    The WebHDFS URL of the NameNode (e.g., https://deb13-spark1.casdds.casd:50470).
-.PARAMETER RmWeb
-    The ResourceManager Web UI URL (e.g., https://deb13-spark1.casdds.casd:8090).
-.PARAMETER ServiceIp
-    The IP address of the primary service node.
-.PARAMETER ServiceFqdn
-    The Fully Qualified Domain Name (FQDN) of the primary service node.
-.PARAMETER Renewer
-    The principal authorized to renew delegation tokens (default: "hdfs").
-.PARAMETER HdfsRpcPort
-    The RPC port for HDFS (default: 9000).
-.PARAMETER RmRpcPort
-    The RPC port for YARN ResourceManager (default: 8032).
-.PARAMETER StagingDir
-    The HDFS staging directory for Spark jobs.
-.PARAMETER DriverPort
-    The port used by the Spark driver (default: 20000).
+    The registry path of cluster config value (e.g., HKLM:\Software\CASD\Cluster).
 
 .EXAMPLE
-    .\Setup-HadoopTokens.ps1 -Verbose
-    Runs the setup with verbose output to track each configuration step.
-
-.EXAMPLE
-    .\Setup-HadoopTokens.ps1 -ServiceFqdn "custom-node.example.com" -HdfsRpcPort 8020
-    Runs the setup with custom FQDN and RPC port overrides.
+    .\install-tokens.ps1 -ConfRegPath "HKCU:\Software\CASD\test"
+    Runs the setup with a custom registry path.
 #>
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $false, HelpMessage = "WebHDFS URL of the NameNode")]
-    [string] $NameNodeWeb = "https://d1mutua-m01.casd.fr:50470",
-
-    [Parameter(Mandatory = $false, HelpMessage = "ResourceManager Web UI URL")]
-    [string] $RmWeb       = "https://d1mutua-m01.casd.fr:8090",
-
-    [Parameter(Mandatory = $false, HelpMessage = "IP address of the service node")]
-    [string] $ServiceIp   = "192.168.38.11",
-
-    [Parameter(Mandatory = $false, HelpMessage = "FQDN of the service node")]
-    [string] $ServiceFqdn = "d1mutua-m01.casd.fr",
-
-    [Parameter(Mandatory = $false, HelpMessage = "Principal authorized to renew tokens")]
-    [string] $Renewer     = "hdfs",
-
-    [Parameter(Mandatory = $false, HelpMessage = "HDFS RPC port")]
-    [string] $HdfsRpcPort = "9000",
-
-    [Parameter(Mandatory = $false, HelpMessage = "YARN ResourceManager RPC port")]
-    [string] $RmRpcPort   = "8032",
-
-    [Parameter(Mandatory = $false, HelpMessage = "HDFS staging directory for Spark")]
-    [string] $StagingDir  = "hdfs://d1mutua-m01.casd.fr:9000/users",
-
-    [Parameter(Mandatory = $false, HelpMessage = "Spark driver port")]
-    [int]    $DriverPort  = 7077
+    [Parameter(Mandatory = $false, HelpMessage = "registry path of cluster config value")]
+    [string] $ConfRegPath = "HKLM:\Software\CASD\cluster"
 )
 
 # ==============================================================================
@@ -82,17 +38,16 @@ $toolsDir = $PSScriptRoot
 # Refresh script name
 $refreshScriptName = "refresh-tokens.ps1"
 $refreshScript = Join-Path $toolsDir $refreshScriptName
+$warnExtraMsg = "Contact datascience@casd.eu to check if you have cluster access in your project"
 
 $userRegPath = "HKCU:\Software\CASD\Hadoop"
-$confRegPath = "HKLM:\Software\CASD\Cluster"
-# $confRegPath = "HKCU:\Software\CASD\Hadoop"
 
 # Use CurrentUserAllHosts so the configuration is available to all PowerShell
 # hosts for the current user.
 $profilePath = $PROFILE.CurrentUserAllHosts
 
 $profileBeginMarker = "# === HDFS/YARN/Spark delegation tokens BEGIN ==="
-$profileEndMarker   = "# === HDFS/YARN/Spark delegation tokens END ==="
+$profileEndMarker = "# === HDFS/YARN/Spark delegation tokens END ==="
 
 Write-Verbose "Starting Hadoop/Spark token environment configuration..."
 Write-Verbose "Tools directory : $toolsDir"
@@ -101,42 +56,71 @@ Write-Verbose "Profile         : $profilePath"
 
 
 # ==============================================================================
-#region Helper functions
+# Helper functions
 # ==============================================================================
 
-function ConvertTo-PowerShellSingleQuotedString {
+function ConvertToPSString
+{
+    <#
+    .SYNOPSIS
+        Converts a string value into a PowerShell single-quoted string literal.
+
+    .DESCRIPTION
+        Wraps the specified string value in single quotes and escapes any
+        existing single quotes by doubling them, according to PowerShell's
+        single-quoted string syntax.
+
+        For example: O'Brien becomes: 'O''Brien'
+
+    .PARAMETER Value
+        The string value to convert.
+
+    .OUTPUTS
+        System.String
+        A PowerShell single-quoted string literal.
+
+    .NOTES
+        PowerShell single-quoted strings escape a single quote by using two consecutive single quotes.
+    #>
+
     param(
         [Parameter(Mandatory)]
         [string] $Value
     )
+
     # PowerShell single-quoted strings escape ' as ''
     return "'" + ($Value -replace "'", "''") + "'"
 }
 
-function Protect-TokenDirectory {
+
+function Protect-TokenDirectory
+{
     param(
         [Parameter(Mandatory = $true)]
         [string]$DirectoryPath
     )
 
-    if ([string]::IsNullOrWhiteSpace($DirectoryPath)) {
+    if ( [string]::IsNullOrWhiteSpace($DirectoryPath))
+    {
         return
     }
 
-    if (-not (Test-Path -LiteralPath $DirectoryPath -PathType Container)) {
+    if (-not (Test-Path -LiteralPath $DirectoryPath -PathType Container))
+    {
         New-Item -ItemType Directory -Path $DirectoryPath -Force | Out-Null
     }
 
     $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 
-    try {
+    try
+    {
         $dirInfo = New-Object System.IO.DirectoryInfo($DirectoryPath)
 
         # IMPORTANT:
         # Only get the DACL / Access section.
         # Do NOT touch Audit/SACL because that requires SeSecurityPrivilege.
         $acl = $dirInfo.GetAccessControl(
-            [System.Security.AccessControl.AccessControlSections]::Access
+                [System.Security.AccessControl.AccessControlSections]::Access
         )
 
         # Disable inheritance and remove inherited rules
@@ -145,39 +129,40 @@ function Protect-TokenDirectory {
         # Remove all explicit access rules
         $existingRules = @(
             $acl.GetAccessRules(
-                $true,
-                $true,
-                [System.Security.Principal.NTAccount]
+                    $true,
+                    $true,
+                    [System.Security.Principal.NTAccount]
             )
         )
 
-        foreach ($rule in $existingRules) {
+        foreach ($rule in $existingRules)
+        {
             [void]$acl.RemoveAccessRule($rule)
         }
 
         $rights = [System.Security.AccessControl.FileSystemRights]::FullControl
-        $allow  = [System.Security.AccessControl.AccessControlType]::Allow
+        $allow = [System.Security.AccessControl.AccessControlType]::Allow
 
-        $inheritFlags = `
-            [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor `
-            [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+        $inheritFlags =     `
+                [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor     `
+                [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
 
         $propagationFlags = [System.Security.AccessControl.PropagationFlags]::None
 
         $userRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-            $currentUser,
-            $rights,
-            $inheritFlags,
-            $propagationFlags,
-            $allow
+        $currentUser,
+        $rights,
+        $inheritFlags,
+        $propagationFlags,
+        $allow
         )
 
         $systemRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-            "NT AUTHORITY\SYSTEM",
-            $rights,
-            $inheritFlags,
-            $propagationFlags,
-            $allow
+        "NT AUTHORITY\SYSTEM",
+        $rights,
+        $inheritFlags,
+        $propagationFlags,
+        $allow
         )
 
         [void]$acl.AddAccessRule($userRule)
@@ -188,9 +173,13 @@ function Protect-TokenDirectory {
 
         Write-Verbose "Secured token directory ACL: $DirectoryPath"
     }
-    catch {
+    catch
+    {
         $errMsg = "Unknown execution error"
-        if ($Error.Count -gt 0 -and $Error[0].Exception) { $errMsg = $Error[0].Exception.Message}
+        if ($Error.Count -gt 0 -and $Error[0].Exception)
+        {
+            $errMsg = $Error[0].Exception.Message
+        }
         Write-Warning "Failed to set ACLs on token directory '$DirectoryPath'. Error: $errMsg"
     }
 }
@@ -202,7 +191,8 @@ function Protect-TokenDirectory {
 #region 0. Pre-flight checks, and conf value assign
 # ==============================================================================
 
-if (-not (Test-Path -LiteralPath $refreshScript -PathType Leaf)) {
+if (-not (Test-Path -LiteralPath $refreshScript -PathType Leaf))
+{
     throw @"
 Critical dependency missing.
 
@@ -213,53 +203,63 @@ Make sure '$refreshScriptName' is located next to this setup script.
 "@
 }
 
-if ([string]::IsNullOrWhiteSpace($env:HADOOP_HOME)) {
-    Write-Warning "Environment variable HADOOP_HOME is not defined. Hadoop commands may not work."
+if ( [string]::IsNullOrWhiteSpace($env:HADOOP_HOME))
+{
+    throw "Environment variable HADOOP_HOME is not defined. $warnExtraMsg"
 }
 
-if ([string]::IsNullOrWhiteSpace($env:HADOOP_CONF_DIR)) {
-    Write-Warning "Environment variable HADOOP_CONF_DIR is not defined. Hadoop commands may not work."
+if ( [string]::IsNullOrWhiteSpace($env:HADOOP_CONF_DIR))
+{
+    throw "Environment variable HADOOP_CONF_DIR is not defined. $warnExtraMsg"
 }
 
-if ([string]::IsNullOrWhiteSpace($env:SPARK_HOME)) {
-    Write-Warning "SPARK_HOME is not defined. spark-submit may not work."
+if ( [string]::IsNullOrWhiteSpace($env:SPARK_HOME))
+{
+    throw "SPARK_HOME is not defined. You don't have a valid spark installation. $warnExtraMsg"
 }
 
-# Override default config value with registry values when they exist
-if (Test-Path -Path $confRegPath) {
+# Get cluster config value from the registry, if registry path does not exist, stop all
+if (Test-Path -Path $ConfRegPath) {
 
-    $RegConf = Get-ItemProperty -Path $confRegPath
+    $RegConf = Get-ItemProperty -Path $ConfRegPath
 
-    if ($null -ne $RegConf.NameNodeWeb) {
-        $NameNodeWeb = [string]$RegConf.NameNodeWeb
+    $NameNodeWeb = [string]$RegConf.NameNodeWeb
+    if ([string]::IsNullOrWhiteSpace($NameNodeWeb)) {
+        throw "The mandatory configuration value NameNodeWeb is missing. $warnExtraMsg"
     }
 
-    if ($null -ne $RegConf.RmWeb) {
-        $RmWeb = [string]$RegConf.RmWeb
+    $RmWeb = [string]$RegConf.RmWeb
+    if ([string]::IsNullOrWhiteSpace($RmWeb)) {
+        throw "The mandatory configuration value RmWeb is missing. $warnExtraMsg"
     }
 
-    if ($null -ne $RegConf.ServiceIp) {
-        $ServiceIp = [string]$RegConf.ServiceIp
+    $ServiceIp = [string]$RegConf.ServiceIp
+    if ([string]::IsNullOrWhiteSpace($ServiceIp)) {
+        throw "The mandatory configuration value ServiceIp is missing. $warnExtraMsg"
     }
 
-    if ($null -ne $RegConf.ServiceFqdn) {
-        $ServiceFqdn = [string]$RegConf.ServiceFqdn
+    $ServiceFqdn = [string]$RegConf.ServiceFqdn
+    if ([string]::IsNullOrWhiteSpace($ServiceFqdn)) {
+        throw "The mandatory configuration value ServiceFqdn is missing. $warnExtraMsg"
     }
 
-    if ($null -ne $RegConf.Renewer) {
-        $Renewer = [string]$RegConf.Renewer
+    $Renewer = [string]$RegConf.Renewer
+    if ([string]::IsNullOrWhiteSpace($Renewer)) {
+        throw "The mandatory configuration value Renewer is missing. $warnExtraMsg"
     }
 
-    if ($null -ne $RegConf.HdfsRpcPort) {
-        $HdfsRpcPort = [string]$RegConf.HdfsRpcPort
+    $HdfsRpcPort = [string]$RegConf.HdfsRpcPort
+    if ([string]::IsNullOrWhiteSpace($HdfsRpcPort)) {
+        throw "The mandatory configuration value HdfsRpcPort is missing. $warnExtraMsg"
     }
 
-    if ($null -ne $RegConf.RmRpcPort) {
-        $RmRpcPort = [string]$RegConf.RmRpcPort
+    $RmRpcPort = [string]$RegConf.RmRpcPort
+    if ([string]::IsNullOrWhiteSpace($RmRpcPort)) {
+        throw "The mandatory configuration value RmRpcPort is missing. $warnExtraMsg"
     }
 }
 else {
-    Write-Warning "Cluster configuration does not exist in registry path $confRegPath. Fall back to script default value."
+    throw "Cluster configuration does not exist in registry path $ConfRegPath. $warnExtraMsg"
 }
 
 Write-Host ""
@@ -282,7 +282,8 @@ Write-Host ""
 
 $tokenDir = Join-Path $env:LOCALAPPDATA "CASD\tokens"
 
-if (-not (Test-Path -LiteralPath $tokenDir -PathType Container)) {
+if (-not (Test-Path -LiteralPath $tokenDir -PathType Container))
+{
     New-Item -ItemType Directory -Path $tokenDir -Force | Out-Null
     Write-Verbose "Created token directory: $tokenDir"
 }
@@ -300,44 +301,59 @@ Protect-TokenDirectory -DirectoryPath $tokenDir
 #region 2. Registry configuration
 # ==============================================================================
 
-if (-not (Test-Path -LiteralPath $userRegPath)) {
+if (-not (Test-Path -LiteralPath $userRegPath))
+{
     New-Item -Path $userRegPath -Force | Out-Null
 }
 
 # Prefer HADOOP_CONF_DIR if it is explicitly configured.
 # Otherwise fall back to HADOOP_HOME\etc\hadoop.
 $hadoopConfDir = ""
-if (-not [string]::IsNullOrWhiteSpace($env:HADOOP_CONF_DIR)) {
+if (-not [string]::IsNullOrWhiteSpace($env:HADOOP_CONF_DIR))
+{
     $hadoopConfDir = $env:HADOOP_CONF_DIR
 }
-elseif (-not [string]::IsNullOrWhiteSpace($env:HADOOP_HOME)) {
+elseif (-not [string]::IsNullOrWhiteSpace($env:HADOOP_HOME))
+{
     $hadoopConfDir = Join-Path $env:HADOOP_HOME "etc\hadoop"
 }
 
 # Define configuration properties to store in the registry
 $conf = @{
-    ToolsPath   = $toolsDir
-    TokenDir    = $tokenDir
+    ToolsPath = $toolsDir
+    TokenDir = $tokenDir
     NameNodeWeb = $NameNodeWeb
-    RmWeb       = $RmWeb
-    ServiceIp   = $ServiceIp
+    RmWeb = $RmWeb
+    ServiceIp = $ServiceIp
     ServiceFqdn = $ServiceFqdn
-    Renewer     = $Renewer
+    Renewer = $Renewer
     HdfsRpcPort = $HdfsRpcPort
-    RmRpcPort   = $RmRpcPort
-    StagingDir  = $StagingDir
-    SparkHome   = if ($env:SPARK_HOME) { $env:SPARK_HOME } else { "" }
-    HadoopHome  = if ($env:HADOOP_HOME) { $env:HADOOP_HOME } else { "" }
-    HadoopConf  = $hadoopConfDir
+    RmRpcPort = $RmRpcPort
+    SparkHome = if ($env:SPARK_HOME)
+    {
+        $env:SPARK_HOME
+    }
+    else
+    {
+        ""
+    }
+    HadoopHome = if ($env:HADOOP_HOME)
+    {
+        $env:HADOOP_HOME
+    }
+    else
+    {
+        ""
+    }
+    HadoopConf = $hadoopConfDir
 }
 
 # Write or update each property in the registry
-foreach ($key in $conf.Keys) {
+foreach ($key in $conf.Keys)
+{
     Set-ItemProperty -Path $userRegPath -Name $key -Value $conf[$key] -Type String -Force
 }
 
-# DriverPort is stored as a DWord (integer)
-Set-ItemProperty -Path $userRegPath -Name "DriverPort" -Value $DriverPort -Type DWord -Force
 
 Write-Verbose "Configuration written to: $userRegPath"
 
@@ -353,17 +369,19 @@ Write-Verbose "Configuration written to: $userRegPath"
 # ------------------------------------------------------------------------------
 
 $profileDir = Split-Path -Parent $profilePath
-if (-not (Test-Path -LiteralPath $profileDir -PathType Container)) {
+if (-not (Test-Path -LiteralPath $profileDir -PathType Container))
+{
     New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
 }
 
-if (-not (Test-Path -LiteralPath $profilePath -PathType Leaf)) {
+if (-not (Test-Path -LiteralPath $profilePath -PathType Leaf))
+{
     New-Item -ItemType File -Path $profilePath -Force | Out-Null
 }
 
 # Build paths as literals for the generated profile.
 # These values are intentionally resolved NOW, during installation.
-$profileRefreshScript = ConvertTo-PowerShellSingleQuotedString $refreshScript
+$profileRefreshScript = ConvertToPSString $refreshScript
 
 # ------------------------------------------------------------------------------
 # Profile block
@@ -461,31 +479,39 @@ $profileEndMarker
 # ------------------------------------------------------------------------------
 
 $profileContent = Get-Content -LiteralPath $profilePath -Raw -ErrorAction SilentlyContinue
-if ($null -eq $profileContent) {
+if ($null -eq $profileContent)
+{
     $profileContent = ""
 }
 
 $escapedBegin = [regex]::Escape($profileBeginMarker)
-$escapedEnd   = [regex]::Escape($profileEndMarker)
+$escapedEnd = [regex]::Escape($profileEndMarker)
 $profilePattern = "(?s)$escapedBegin.*?$escapedEnd"
 
-if ($profileContent -match $profilePattern) {
+if ($profileContent -match $profilePattern)
+{
     Write-Verbose "Existing CASD profile block found. Replacing it."
-    $profileContent = [regex]::Replace($profileContent, $profilePattern, $profileBlock.TrimEnd())
+    $profileContent = [regex]::Replace($profileContent, $profilePattern,$profileBlock.TrimEnd())
 }
-else {
+else
+{
     Write-Verbose "No existing CASD profile block found. Adding it."
     # Ensure clean appending with proper newline separation
     $profileContent = $profileContent.TrimEnd() + "`r`n" + $profileBlock.TrimEnd() + "`r`n"
 }
 
-try {
+try
+{
     Set-Content -LiteralPath $profilePath -Value $profileContent -Encoding UTF8 -Force
     Write-Verbose "PowerShell profile updated: $profilePath"
 }
-catch {
+catch
+{
     $errMsg = "Unknown execution error"
-    if ($Error.Count -gt 0 -and $Error[0].Exception) { $errMsg = $Error[0].Exception.Message}
+    if ($Error.Count -gt 0 -and $Error[0].Exception)
+    {
+        $errMsg = $Error[0].Exception.Message
+    }
     Write-Error "Failed to write to PowerShell profile: $errMsg"
 }
 
@@ -497,17 +523,23 @@ catch {
 # ==============================================================================
 
 Write-Host "Generating initial token set..." -NoNewline
-try {
+try
+{
     & $refreshScript -Quiet -ErrorAction Stop
-    if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+    if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0)
+    {
         throw "refresh-tokens.ps1 returned exit code $LASTEXITCODE."
     }
     Write-Host " [OK]" -ForegroundColor Green
 }
-catch {
+catch
+{
     Write-Host " [FAILED]" -ForegroundColor Red
     $errMsg = "Unknown execution error"
-    if ($Error.Count -gt 0 -and $Error[0].Exception) { $errMsg = $Error[0].Exception.Message}
+    if ($Error.Count -gt 0 -and $Error[0].Exception)
+    {
+        $errMsg = $Error[0].Exception.Message
+    }
     Write-Warning "Initial token generation failed. You may need to run refresh-tokens.ps1 manually. Error: $errMsg"
     # Do not throw here, as the environment setup (registry/profile) was still successful.
 }
