@@ -38,6 +38,17 @@ You can visit the following url by using the `Firefox` web browser.
 
 To facilitate the installation of Spark and HDFS client, CASD has developed an installation script. 
 
+You can find this script in `C:\Users\Public\Documents\cluster_install`.
+
+Open a powershell terminal, and run the below command
+
+```powershell
+cd C:\Users\Public\Documents\cluster_install
+
+#run the installation script
+ .\install_spark.ps1
+```
+
 > After this step, you only have a standard spark, hdfs client which works on local mode. To connect to the cluster,
 > and submit jobs, you need to follow the instructions of step 4.
 > If you encounter any error in this step. copy the error message and send to `datascience@casd.eu`
@@ -45,6 +56,15 @@ To facilitate the installation of Spark and HDFS client, CASD has developed an i
 
 ## 4. Configure Spark, HDFS client for cluster access
 
+To access the `spark/hdfs` cluster, you need to run a second script which will modify the default spark, hdfs configuration
+
+Run the below command in a powershell terminal
+
+```powershell
+cd C:\Users\Public\Documents\cluster_install
+
+.\install_cluster_mode_conf.ps1
+```
 
 If everything works well, you can close the powershell terminal now
 
