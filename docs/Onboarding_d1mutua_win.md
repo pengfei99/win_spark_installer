@@ -43,7 +43,7 @@ You can find this script in `C:\Users\Public\Documents\cluster_install`.
 Open a powershell terminal, and run the below command
 
 ```powershell
-cd C:\Users\Public\Documents\cluster_install
+cd C:\Users\Public\Documents\cluster_conf_script
 
 #run the installation script
  .\install_spark.ps1
@@ -61,7 +61,7 @@ To access the `spark/hdfs` cluster, you need to run a second script which will m
 Run the below command in a powershell terminal
 
 ```powershell
-cd C:\Users\Public\Documents\cluster_install
+cd C:\Users\Public\Documents\cluster_conf_script
 
 .\install_cluster_mode_conf.ps1
 ```
