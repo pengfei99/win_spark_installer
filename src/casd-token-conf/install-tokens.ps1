@@ -45,16 +45,16 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false, HelpMessage = "WebHDFS URL of the NameNode")]
-    [string] $NameNodeWeb = "https://deb13-spark1.casdds.casd:50470",
+    [string] $NameNodeWeb = "https://d1mutua-m01.casd.fr:50470",
 
     [Parameter(Mandatory = $false, HelpMessage = "ResourceManager Web UI URL")]
-    [string] $RmWeb       = "https://deb13-spark1.casdds.casd:8090",
+    [string] $RmWeb       = "https://d1mutua-m01.casd.fr:8090",
 
     [Parameter(Mandatory = $false, HelpMessage = "IP address of the service node")]
-    [string] $ServiceIp   = "10.50.5.203",
+    [string] $ServiceIp   = "192.168.38.11",
 
     [Parameter(Mandatory = $false, HelpMessage = "FQDN of the service node")]
-    [string] $ServiceFqdn = "deb13-spark1.casdds.casd",
+    [string] $ServiceFqdn = "d1mutua-m01.casd.fr",
 
     [Parameter(Mandatory = $false, HelpMessage = "Principal authorized to renew tokens")]
     [string] $Renewer     = "hdfs",
@@ -66,10 +66,10 @@ param(
     [string] $RmRpcPort   = "8032",
 
     [Parameter(Mandatory = $false, HelpMessage = "HDFS staging directory for Spark")]
-    [string] $StagingDir  = "hdfs://deb13-spark1.casdds.casd:9000/users",
+    [string] $StagingDir  = "hdfs://d1mutua-m01.casd.fr:9000/users",
 
     [Parameter(Mandatory = $false, HelpMessage = "Spark driver port")]
-    [int]    $DriverPort  = 20000
+    [int]    $DriverPort  = 7077
 )
 
 # ==============================================================================
@@ -83,7 +83,9 @@ $toolsDir = $PSScriptRoot
 $refreshScriptName = "refresh-tokens.ps1"
 $refreshScript = Join-Path $toolsDir $refreshScriptName
 
-$registryPath = "HKCU:\Software\CASD\Hadoop"
+$userRegPath = "HKCU:\Software\CASD\Hadoop"
+$confRegPath = "HKLM:\Software\CASD\Hadoop"
+# $confRegPath = "HKCU:\Software\CASD\Hadoop"
 
 # Use CurrentUserAllHosts so the configuration is available to all PowerShell
 # hosts for the current user.
@@ -187,7 +189,9 @@ function Protect-TokenDirectory {
         Write-Verbose "Secured token directory ACL: $DirectoryPath"
     }
     catch {
-        Write-Warning "Failed to set ACLs on token directory '$DirectoryPath'. Error: $($_.Exception.Message)"
+        $errMsg = "Unknown execution error"
+        if ($Error.Count -gt 0 -and $Error[0].Exception) { $errMsg = $Error[0].Exception.Message}
+        Write-Warning "Failed to set ACLs on token directory '$DirectoryPath'. Error: $errMsg"
     }
 }
 
@@ -195,7 +199,7 @@ function Protect-TokenDirectory {
 
 
 # ==============================================================================
-#region 0. Pre-flight checks
+#region 0. Pre-flight checks, and conf value assign
 # ==============================================================================
 
 if (-not (Test-Path -LiteralPath $refreshScript -PathType Leaf)) {
@@ -220,6 +224,54 @@ if ([string]::IsNullOrWhiteSpace($env:HADOOP_CONF_DIR)) {
 if ([string]::IsNullOrWhiteSpace($env:SPARK_HOME)) {
     Write-Warning "SPARK_HOME is not defined. spark-submit may not work."
 }
+
+# Override default config value with registry values when they exist
+if (Test-Path -Path $confRegPath) {
+
+    $RegConf = Get-ItemProperty -Path $confRegPath
+
+    if ($null -ne $RegConf.NameNodeWeb) {
+        $NameNodeWeb = [string]$RegConf.NameNodeWeb
+    }
+
+    if ($null -ne $RegConf.RmWeb) {
+        $RmWeb = [string]$RegConf.RmWeb
+    }
+
+    if ($null -ne $RegConf.ServiceIp) {
+        $ServiceIp = [string]$RegConf.ServiceIp
+    }
+
+    if ($null -ne $RegConf.ServiceFqdn) {
+        $ServiceFqdn = [string]$RegConf.ServiceFqdn
+    }
+
+    if ($null -ne $RegConf.Renewer) {
+        $Renewer = [string]$RegConf.Renewer
+    }
+
+    if ($null -ne $RegConf.HdfsRpcPort) {
+        $HdfsRpcPort = [string]$RegConf.HdfsRpcPort
+    }
+
+    if ($null -ne $RegConf.RmRpcPort) {
+        $RmRpcPort = [string]$RegConf.RmRpcPort
+    }
+}
+else {
+    Write-Warning "Cluster configuration does not exist in registry path $confRegPath. Fall back to script default value."
+}
+
+Write-Host ""
+Write-Host "Effective Hadoop configuration:" -ForegroundColor Cyan
+Write-Host "  NameNodeWeb  : $NameNodeWeb"
+Write-Host "  RmWeb        : $RmWeb"
+Write-Host "  ServiceIp    : $ServiceIp"
+Write-Host "  ServiceFqdn  : $ServiceFqdn"
+Write-Host "  Renewer      : $Renewer"
+Write-Host "  HdfsRpcPort  : $HdfsRpcPort"
+Write-Host "  RmRpcPort    : $RmRpcPort"
+Write-Host ""
 
 #endregion 0
 
@@ -248,8 +300,8 @@ Protect-TokenDirectory -DirectoryPath $tokenDir
 #region 2. Registry configuration
 # ==============================================================================
 
-if (-not (Test-Path -LiteralPath $registryPath)) {
-    New-Item -Path $registryPath -Force | Out-Null
+if (-not (Test-Path -LiteralPath $userRegPath)) {
+    New-Item -Path $userRegPath -Force | Out-Null
 }
 
 # Prefer HADOOP_CONF_DIR if it is explicitly configured.
@@ -281,13 +333,13 @@ $conf = @{
 
 # Write or update each property in the registry
 foreach ($key in $conf.Keys) {
-    Set-ItemProperty -Path $registryPath -Name $key -Value $conf[$key] -Type String -Force
+    Set-ItemProperty -Path $userRegPath -Name $key -Value $conf[$key] -Type String -Force
 }
 
 # DriverPort is stored as a DWord (integer)
-Set-ItemProperty -Path $registryPath -Name "DriverPort" -Value $DriverPort -Type DWord -Force
+Set-ItemProperty -Path $userRegPath -Name "DriverPort" -Value $DriverPort -Type DWord -Force
 
-Write-Verbose "Configuration written to: $registryPath"
+Write-Verbose "Configuration written to: $userRegPath"
 
 #endregion 2
 
@@ -374,7 +426,9 @@ function global:spark-submit {
         `$localExitCode = `$LASTEXITCODE
     }
     catch {
-        Write-Error "Failed to execute spark-submit: `$$_"
+        `$errMsg = "Unknown execution error"
+        if (`$Error.Count -gt 0 -and `$Error[0].Exception) { `$errMsg = `$Error[0].Exception.Message}
+        Write-Error "Failed to execute spark-submit: `$errMsg"
         `$localExitCode = 1
     }
     finally {
@@ -430,7 +484,9 @@ try {
     Write-Verbose "PowerShell profile updated: $profilePath"
 }
 catch {
-    Write-Error "Failed to write to PowerShell profile: $_"
+    $errMsg = "Unknown execution error"
+    if ($Error.Count -gt 0 -and $Error[0].Exception) { $errMsg = $Error[0].Exception.Message}
+    Write-Error "Failed to write to PowerShell profile: $errMsg"
 }
 
 #endregion 3
@@ -450,7 +506,9 @@ try {
 }
 catch {
     Write-Host " [FAILED]" -ForegroundColor Red
-    Write-Warning "Initial token generation failed. You may need to run refresh-tokens.ps1 manually. Error: $_"
+    $errMsg = "Unknown execution error"
+    if ($Error.Count -gt 0 -and $Error[0].Exception) { $errMsg = $Error[0].Exception.Message}
+    Write-Warning "Initial token generation failed. You may need to run refresh-tokens.ps1 manually. Error: $errMsg"
     # Do not throw here, as the environment setup (registry/profile) was still successful.
 }
 
