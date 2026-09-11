@@ -84,7 +84,7 @@ $refreshScriptName = "refresh-tokens.ps1"
 $refreshScript = Join-Path $toolsDir $refreshScriptName
 
 $userRegPath = "HKCU:\Software\CASD\Hadoop"
-$confRegPath = "HKLM:\Software\CASD\Hadoop"
+$confRegPath = "HKLM:\Software\CASD\Cluster"
 # $confRegPath = "HKCU:\Software\CASD\Hadoop"
 
 # Use CurrentUserAllHosts so the configuration is available to all PowerShell
