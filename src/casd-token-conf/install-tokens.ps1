@@ -25,7 +25,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false, HelpMessage = "registry path of cluster config value")]
-    [string] $ConfRegPath = "HKLM:\Software\CASD\cluster"
+    [string] $ConfRegPath = "HKLM:\Software\CASD\hdp-cluster"
 )
 
 # ==============================================================================
@@ -87,40 +87,34 @@ function ConvertToPSString
         [Parameter(Mandatory)]
         [string] $Value
     )
-
     # PowerShell single-quoted strings escape ' as ''
     return "'" + ($Value -replace "'", "''") + "'"
 }
 
-
-function Protect-TokenDirectory
-{
+function Protect-TokenDirectory {
     param(
         [Parameter(Mandatory = $true)]
         [string]$DirectoryPath
     )
 
-    if ( [string]::IsNullOrWhiteSpace($DirectoryPath))
-    {
+    if ([string]::IsNullOrWhiteSpace($DirectoryPath)) {
         return
     }
 
-    if (-not (Test-Path -LiteralPath $DirectoryPath -PathType Container))
-    {
+    if (-not (Test-Path -LiteralPath $DirectoryPath -PathType Container)) {
         New-Item -ItemType Directory -Path $DirectoryPath -Force | Out-Null
     }
 
     $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 
-    try
-    {
+    try {
         $dirInfo = New-Object System.IO.DirectoryInfo($DirectoryPath)
 
         # IMPORTANT:
         # Only get the DACL / Access section.
         # Do NOT touch Audit/SACL because that requires SeSecurityPrivilege.
         $acl = $dirInfo.GetAccessControl(
-                [System.Security.AccessControl.AccessControlSections]::Access
+            [System.Security.AccessControl.AccessControlSections]::Access
         )
 
         # Disable inheritance and remove inherited rules
@@ -129,14 +123,13 @@ function Protect-TokenDirectory
         # Remove all explicit access rules
         $existingRules = @(
             $acl.GetAccessRules(
-                    $true,
-                    $true,
-                    [System.Security.Principal.NTAccount]
+                $true,
+                $true,
+                [System.Security.Principal.NTAccount]
             )
         )
 
-        foreach ($rule in $existingRules)
-        {
+        foreach ($rule in $existingRules) {
             [void]$acl.RemoveAccessRule($rule)
         }
 
@@ -158,11 +151,11 @@ function Protect-TokenDirectory
         )
 
         $systemRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-        "NT AUTHORITY\SYSTEM",
-        $rights,
-        $inheritFlags,
-        $propagationFlags,
-        $allow
+            "NT AUTHORITY\SYSTEM",
+            $rights,
+            $inheritFlags,
+            $propagationFlags,
+            $allow
         )
 
         [void]$acl.AddAccessRule($userRule)
@@ -173,13 +166,9 @@ function Protect-TokenDirectory
 
         Write-Verbose "Secured token directory ACL: $DirectoryPath"
     }
-    catch
-    {
+    catch {
         $errMsg = "Unknown execution error"
-        if ($Error.Count -gt 0 -and $Error[0].Exception)
-        {
-            $errMsg = $Error[0].Exception.Message
-        }
+        if ($Error.Count -gt 0 -and $Error[0].Exception) { $errMsg = $Error[0].Exception.Message}
         Write-Warning "Failed to set ACLs on token directory '$DirectoryPath'. Error: $errMsg"
     }
 }
@@ -191,8 +180,7 @@ function Protect-TokenDirectory
 #region 0. Pre-flight checks, and conf value assign
 # ==============================================================================
 
-if (-not (Test-Path -LiteralPath $refreshScript -PathType Leaf))
-{
+if (-not (Test-Path -LiteralPath $refreshScript -PathType Leaf)) {
     throw @"
 Critical dependency missing.
 

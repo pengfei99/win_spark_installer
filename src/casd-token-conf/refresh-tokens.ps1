@@ -56,7 +56,7 @@ function Get-EnvVar {
 }
 
 # User-level registry locations for configuration and active session state tracking.
-$REG      = "HKCU:\Software\CASD\Hadoop"
+$REG      = "HKCU:\Software\CASD\hdp-cluster"
 $REG_SESS = "$REG\Sessions"
 $TOKEN_GEN_JAR_NAME = "make-creds-file-1.0.0-SNAPSHOT.jar"
 $TOKEN_GEN_CLASS_NAME = "org.casd.util.MakeCredsFile"
