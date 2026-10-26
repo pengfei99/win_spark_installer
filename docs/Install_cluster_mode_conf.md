@@ -1,6 +1,7 @@
 # install_cluster_mode_conf.ps1
 
-PowerShell script for configuring a local Hadoop/Spark client to connect to a **remote HDFS, YARN, and Spark cluster**, including CASD cluster security token management.
+This `PowerShell script` is responsible for configuring a local Hadoop/Spark client to connect to a **remote HDFS, YARN, and Spark cluster**, 
+including CASD cluster security token management.
 
 ## 1. Description
 
