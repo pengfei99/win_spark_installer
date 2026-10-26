@@ -8,6 +8,10 @@
     3. If user chooses a version which is different from the current Spark version, it cleans previous Spark installations, and
        user environment variables.
     4. After clean, starts a new fresh Spark installation: installs binary, adds user environment variables.
+    5. Unless -SkipClusterConf is passed, automatically runs install_cluster_mode_conf.ps1 (expected next to this
+       script) right away, in the same process, so Hadoop conf and a spark-defaults.conf matching the Spark
+       version just installed are applied immediately - no separate manual step, no risk of running that
+       script against a stale/previous Spark install.
 
 .NOTES
     Expected source zip names:
@@ -37,7 +41,13 @@ param(
 # If valid, example: 3.5.7 or 4.1.3, skip interactive Spark selection.
     [AllowNull()]
     [AllowEmptyString()]
-    [string]$TargetSparkVersion = $null
+    [string]$TargetSparkVersion = $null,
+
+    # By default, once Spark/Hadoop/Java are installed, this script automatically runs
+    # install_cluster_mode_conf.ps1 (expected next to this script) so that Hadoop conf,
+    # a version-correct spark-defaults.conf, and cluster tokens are set up in the same
+    # pass. Pass this switch to install the runtimes only and skip that step.
+    [switch]$SkipClusterConf
 )
 
 $ErrorActionPreference = 'Stop'
@@ -154,6 +164,7 @@ $SparkDMap = @{
     '3.5.8' = @{ JMajVer = @('11'); HdpVer = @('3.3.6') }
     '3.5.9' = @{ JMajVer = @('11'); HdpVer = @('3.3.6') }
     '4.1.2' = @{ JMajVer = @('17'); HdpVer = @('3.4.3') }
+    '4.1.3' = @{ JMajVer = @('17'); HdpVer = @('3.4.3') }
     '4.2.0' = @{ JMajVer = @('17', '21'); HdpVer = @('3.5.0') }
 
     # Fallback rules
@@ -808,22 +819,38 @@ function ExtractToTargetDir
         $extracted = $false
 
         # 1) Try built-in tar.exe
-        $tar = Get-Command tar.exe -ErrorAction SilentlyContinue
-        if ($tar)
-        {
-            Write-Info "Attempting extraction with tar.exe..."
-            & $tar.Source -xf $ZipPath -C $tempDir 2> $null
+
+        $tarPath = Join-Path $env:SystemRoot "System32\tar.exe"
+        # if not exist in System32, fallback to Get-Command
+        if (-not (Test-Path -LiteralPath $tarPath)) {
+            $found = Get-Command tar.exe -ErrorAction SilentlyContinue
+            if ($found)
+            {
+                $tarPath = $found.Source
+            }
+        }
+
+        if ($tarPath -and (Test-Path -LiteralPath $tarPath)) {
+            Write-Info "Attempting extraction with Windows tar.exe..."
+            Write-Info "Using tar: $tarPath"
+
+            & $tarPath -xf $ZipPath -C $tempDir 2> $null
 
             if ($LASTEXITCODE -eq 0 -and @(Get-ChildItem -LiteralPath $tempDir -Force).Count -gt 0)
             {
                 $extracted = $true
-                Write-Ok "Extraction succeeded using tar.exe."
+                Write-Ok "Extraction succeeded using Windows tar.exe."
             }
             else
             {
-                Write-Warn "tar.exe did not extract successfully. Trying next method."
-                Get-ChildItem -LiteralPath $tempDir -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+                Write-Warn "Windows tar.exe did not extract successfully. Trying next method."
+                Get-ChildItem -LiteralPath $tempDir -Force -ErrorAction SilentlyContinue |
+                        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
             }
+        }
+        else
+        {
+            Write-Warn "Windows tar.exe not found at: $tarPath. Trying next method."
         }
 
         # 2) Try 7-Zip if available
@@ -1361,6 +1388,46 @@ try
     Write-Host ''
     Write-Host 'User environment variables were updated.' -ForegroundColor Yellow
     Write-Host 'Open a new PowerShell window before using spark-submit, spark-shell, or pyspark.' -ForegroundColor Yellow
+
+    # ------------------------------------------------------------------
+    # Step 5: Automatically apply cluster configuration for the version just installed
+    # ------------------------------------------------------------------
+    if ($SkipClusterConf)
+    {
+        Write-Host ''
+        Write-Info 'Your project does not have access of a spark cluster. So the cluster configuration is skipped(-SkipClusterConf was specified).
+        If you are sure your project has a spark cluster, please contact datascience@casd.eu.'
+        # Write-Warn 'Run install_cluster_mode_conf.ps1 manually before using spark-submit, or its spark-defaults.conf will not match this Spark version.'
+    }
+    else
+    {
+        Write-Step 'Step 5: Applying spark cluster configuration'
+
+        $clusterConfScript = Join-Path $PSScriptRoot 'install_cluster_mode_conf.ps1'
+        if (-not (Test-Path -LiteralPath $clusterConfScript -PathType Leaf))
+        {
+            Write-Warn "The required script `install_cluster_mode_conf.ps1` is not found ($clusterConfScript)."
+            Write-Warn 'The spark cluster configuration is failed. You can run only run spark loaclly for now. Please contact datascience@casd.eu for help.'
+        }
+        else
+        {
+            try
+            {
+                # JAVA_HOME/HADOOP_HOME/SPARK_HOME were just set at 'Process' scope above,
+                # so install_cluster_mode_conf.ps1 picks up the version we just installed.
+                & $clusterConfScript
+                Write-Ok 'Cluster configuration applied for the newly installed Spark version.'
+            }
+            catch
+            {
+                $errMsg = "Unknown execution error"
+                if ($Error.Count -gt 0 -and $Error[0].Exception) { $errMsg = $Error[0].Exception.Message }
+                Write-Err "install_cluster_mode_conf.ps1 failed: $errMsg"
+                Write-Warn 'Spark/Hadoop/Java were installed successfully, but cluster configuration was NOT completed.'
+                Write-Warn 'Fix the issue above, then re-run install_cluster_mode_conf.ps1 manually (do not re-run install_spark.ps1, the runtimes are already in place).'
+            }
+        }
+    }
 
 }
 catch
