@@ -9,7 +9,8 @@
       0. Pre-flight check: Verifies all expected source configuration files exist. If any file is missing,
          it stops immediately and shows an error message.
       1. Checks user environment variables HADOOP_HOME, SPARK_HOME, and JAVA_HOME. If they exist, continues to step 2.
-         If not, stops and asks the user to install Spark, Hadoop, and Java first.
+         If not, stops and asks the user to install Spark, Hadoop, and Java first. Check client spark version
+         matches the server spark version.
       2. Checks if HADOOP_CONF_DIR environment variable exists. If it does, copies custom Hadoop config files
          there. If not, creates the environment variable HADOOP_CONF_DIR with value $HADOOP_HOME\etc\hadoop,
          then copies custom Hadoop config files to it.
@@ -58,6 +59,7 @@ param(
     [string]$yarnSiteSrc,
     [string]$sparkDefaultsConfSrc,
     [string]$sparkLogConfSrc,
+    [string]$clusterVersionSrc,
     [string]$pySparkAdapterSrc,
     [string]$sparkLyrAdapterSrc,
     [string]$tokenConvertorSrc,
@@ -105,6 +107,10 @@ if ([string]::IsNullOrWhiteSpace($sparkDefaultsConfSrc)) {
 
 if ([string]::IsNullOrWhiteSpace($sparkLogConfSrc)) {
     $sparkLogConfSrc = Join-Path $ClusterConfSrcDir 'log4j2.properties'
+}
+
+if ([string]::IsNullOrWhiteSpace($clusterVersionSrc)) {
+    $clusterVersionSrc = Join-Path $ClusterConfSrcDir 'cluster-versions.txt'
 }
 
 # ------------------------------------------------------------------
@@ -280,6 +286,174 @@ function Copy-CustomConfFolder {
 }
 
 # ------------------------------------------------------------------
+# Spark version detection
+# ------------------------------------------------------------------
+function Get-CurrentSparkVersion {
+    <#
+    .SYNOPSIS
+        Retrieves the Apache Spark version installed in a specified directory.
+
+    .DESCRIPTION
+        Determines the installed Apache Spark version using the following
+        sources, in order of preference:
+
+        1. The RELEASE file in the Spark installation directory.
+        2. The version embedded in the installation directory name.
+
+        The RELEASE file is preferred because it provides version information
+        independently of the directory naming convention.
+
+        Returns $null if the version cannot be determined.
+
+    .PARAMETER SparkHome
+        The root directory of the Apache Spark installation, typically
+        specified by the SPARK_HOME environment variable.
+
+    .OUTPUTS
+        System.String
+        Returns the Spark version in Major.Minor.Patch format, or $null
+        if the version cannot be determined.
+
+    .EXAMPLE
+        Get-CurrentSparkVersion -SparkHome $env:SPARK_HOME
+
+        Returns the version reported by the Spark installation, for example:
+        4.1.3
+
+    .EXAMPLE
+        Get-CurrentSparkVersion -SparkHome 'C:\Apps\spark-3.5.7'
+
+        Returns 3.5.7 if the RELEASE file is missing or does not contain
+        a recognizable version.
+
+    .NOTES
+        The function does not execute Spark or require Java.
+        It only reads installation metadata and examines the directory name.
+    #>
+
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$SparkHome
+    )
+
+    # Validate the installation directory.
+    if (-not (Test-Path -LiteralPath $SparkHome -PathType Container)) {
+        Write-Verbose "Spark installation directory does not exist: $SparkHome"
+        return $null
+    }
+
+    # Preferred source: the RELEASE file shipped with Spark distributions.
+    $releaseFile = Join-Path -Path $SparkHome -ChildPath 'RELEASE'
+
+    if (Test-Path -LiteralPath $releaseFile -PathType Leaf) {
+        try {
+            $releaseContent = Get-Content `
+                -LiteralPath $releaseFile `
+                -Raw `
+                -ErrorAction Stop
+
+            if ($releaseContent -match '(?i)\bSpark\s+(\d+\.\d+\.\d+)\b') {
+                return $Matches[1]
+            }
+
+            Write-Verbose "No recognizable Spark version found in: $releaseFile"
+        }
+        catch {
+            Write-Verbose "Unable to read RELEASE file '$releaseFile': $($_.Exception.Message)"
+        }
+    }
+
+    # Fallback: extract the version from the installation directory name.
+    $directoryName = Split-Path -Path $SparkHome -Leaf
+
+    if ($directoryName -match '(?i)^spark-(\d+\.\d+\.\d+)$') {
+        return $Matches[1]
+    }
+
+    Write-Verbose "Unable to determine the Spark version from '$SparkHome'."
+    return $null
+}
+
+
+function Get-VersionManifest {
+    <#
+    .SYNOPSIS
+        Reads version information from a manifest file into a hashtable.
+
+    .DESCRIPTION
+        Reads a text file containing key-value entries separated by whitespace.
+        Blank lines and comments beginning with '#' are ignored.
+
+        Each valid entry is stored in a hashtable, allowing values to be
+        retrieved by key for comparison or other operations.
+
+    .PARAMETER Path
+        The path to the version manifest file.
+
+    .OUTPUTS
+        System.Collections.Hashtable
+        Returns a hashtable containing the manifest keys and values.
+
+    .EXAMPLE
+        $Versions = Get-VersionManifest -Path '.\versions.txt'
+        $Versions['spark-version']
+
+        Returns:
+            3.5.7
+
+    .EXAMPLE
+        $Versions = Get-VersionManifest -Path '.\versions.txt'
+
+        if ($Versions['spark-version'] -eq '3.5.7') {
+            Write-Host 'Spark version matches.'
+        }
+
+    .NOTES
+        Duplicate keys overwrite previous values.
+        Malformed lines are ignored with a verbose message.
+    #>
+
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Version manifest file not found: $Path"
+    }
+
+    $versions = @{}
+
+    foreach ($line in Get-Content -LiteralPath $Path -ErrorAction Stop) {
+        $line = $line.Trim()
+
+        # Ignore blank lines and comments.
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')) {
+            continue
+        }
+
+        # Split into a key and value at the first whitespace separator.
+        if ($line -match '^(\S+)\s+(.+)$') {
+            $key = $Matches[1]
+            $value = $Matches[2].Trim()
+
+            $versions[$key] = $value
+        }
+        else {
+            Write-Verbose "Ignoring invalid manifest entry: $line"
+        }
+    }
+
+    return $versions
+}
+
+# ------------------------------------------------------------------
 # Optional Hadoop command check helper
 # ------------------------------------------------------------------
 function Test-HadoopCommand {
@@ -382,6 +556,21 @@ try {
     Write-Ok "SPARK_HOME  = $sparkHome"
     Write-Ok "HADOOP_HOME = $hadoopHome"
 
+    # get current client spark version
+    $clientSparkVer = Get-CurrentSparkVersion -SparkHome $sparkHome
+    if ([string]::IsNullOrWhiteSpace($clientSparkVer)) {
+        throw "Could not detect the installed Spark version from '$sparkHome' (no RELEASE file and folder name does not match 'spark-<version>'). spark.yarn.archive cannot be generated safely."
+    }
+    Write-Ok "Detected current client Spark version: $clientSparkVer"
+
+    # get server spark version from `cluster-versions.txt`
+    $clusterVersions = Get-VersionManifest -Path $clusterVersionSrc
+    $clusterSparkVer = $clusterVersions['spark']
+
+    if ($clientSparkVer -ne $clusterSparkVer) {
+        throw "The client spark version: '$clientSparkVer', do not match the cluster spark version: '$clusterSparkVer'. Please install the right spark version."
+    }
+
     # Make these available in the current process explicitly.
     $env:JAVA_HOME = $javaHome
     $env:SPARK_HOME = $sparkHome
@@ -421,6 +610,7 @@ try {
     # Step 3: Copy Spark configuration files
     # --------------------------------------------------------------
     Write-Step 'Step 3: Copy Spark configuration files'
+    # check if current client spark version match the cluster spark version, if yes continue, else throw error
 
     $sparkConfDir = Join-Path $sparkHome 'conf'
     Write-Info "Spark configuration directory: $sparkConfDir"
@@ -528,6 +718,6 @@ try {
 catch {
     $errMsg = "Unknown execution error"
     if ($Error.Count -gt 0 -and $Error[0].Exception) { $errMsg = $Error[0].Exception.Message}
-    Write-Err $errorMsg
+    Write-Err $errMsg
     exit 1
 }
