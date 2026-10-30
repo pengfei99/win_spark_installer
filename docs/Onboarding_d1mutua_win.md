@@ -210,7 +210,7 @@ you should see a popup `anaconda terminal`. Now you can run the below command to
 
 ```shell
 # check your python version
-python3 -V
+python -V
 
 # create a virtual env with the current python interpreter version
 conda create -n spark_venv python --offline
