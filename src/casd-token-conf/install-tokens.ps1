@@ -3,7 +3,9 @@
     Configures the local PowerShell environment for secure Hadoop/Spark delegation token management.
 
 .DESCRIPTION
-    This script sets up the necessary registry keys, directories, and PowerShell profile wrappers
+    This script reads the cluster configuration parameters from the system registry keys `HKLM:\Software\CASD\hdp-cluster`,
+    then it sets up the necessary config parameter in user registry keys `HKCU:\Software\CASD\Hadoop`.
+    It also sets the root directories for refresh-tokens.ps1, casd_spark.py, etc., and PowerShell profile wrappers
     to automatically manage Hadoop/YARN/Spark delegation tokens in multi-user environments.
 
     It ensures that:
@@ -15,11 +17,11 @@
        cluster nodes.
 
 .PARAMETER NameNodeWeb
-    The registry path of cluster config value (e.g., HKLM:\Software\CASD\Cluster).
+    The registry path of cluster config value (e.g., HKLM:\Software\CASD\hdp-cluster).
 
 .EXAMPLE
     .\install-tokens.ps1 -ConfRegPath "HKCU:\Software\CASD\test"
-    Runs the setup with a custom registry path.
+    Runs the script with a custom registry path.
 #>
 
 [CmdletBinding()]
@@ -39,7 +41,7 @@ $toolsDir = $PSScriptRoot
 $refreshScriptName = "refresh-tokens.ps1"
 $refreshScript = Join-Path $toolsDir $refreshScriptName
 $warnExtraMsg = "Contact datascience@casd.eu to check if you have cluster access in your project"
-
+# end user reg path, all the client script will use this path to get end user hdp values, need to make sure
 $userRegPath = "HKCU:\Software\CASD\Hadoop"
 
 # Use CurrentUserAllHosts so the configuration is available to all PowerShell
