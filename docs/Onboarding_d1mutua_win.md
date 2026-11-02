@@ -8,15 +8,16 @@ We will follow the below steps in this tutorial.
 - check web interface access of the cluster
 - check hdfs client of the cluster
 - check spark client of the cluster
+- check sparklyr client of the cluster
 
 ## 1. Architecture of the cluster
 
 The below figure shows the general architecture of the cluster
 
-![architecture.png](./imgs/drees_cluster_archi_v2.png "width=70%")
+![architecture.png](./imgs/drees_cluster_archi_v3.png "width=70%")
 
 - The `TS-D1MUTUA`: is the main server(Windows) which you connect to via the `SD-BOX`.
-- The `d1mutua-m01, d1mutua-w01/w02/w03`: are the servers which form the spark/hdfs cluster. The end users can not access 
+- The `d1mutua-m01, d1mutua-w01/w02/w03/w04/w05`: are the servers which form the spark/hdfs cluster. The end users can not access 
     them directly, but through spark/hdfs client which are installed/configured on `TS-D1MUTUA`.
 
 ## 2. Check web interface access of the cluster
@@ -38,54 +39,42 @@ You can visit the following url by using the `Firefox` web browser.
 
 To facilitate the installation of Spark and HDFS client, CASD has developed an installation script. 
 
-You can find this script in `C:\Users\Public\Documents\cluster_install`.
+You can find this script in `C:\RO_Cluster\install_spark.ps1`.
 
-Open a powershell terminal, and run the below command
+Open a `powershell terminal`, and run the below command
 
 ```powershell
-cd C:\Users\Public\Documents\cluster_conf_script
+cd C:\RO_Cluster
 
 #run the installation script
  .\install_spark.ps1
 ```
 
-> After this step, you only have a standard spark, hdfs client which works on local mode. To connect to the cluster,
-> and submit jobs, you need to follow the instructions of step 4.
+> After this step, you will be prompted with two questions: 
+>   1. which spark version you want to install? choose 4.1.3 
+>   2. Confirm you choice.
 > If you encounter any error in this step. copy the error message and send to `datascience@casd.eu`
 
 
-## 4. Configure Spark, HDFS client for cluster access
-
-To access the `spark/hdfs` cluster, you need to run a second script which will modify the default spark, hdfs configuration
-
-Run the below command in a powershell terminal
-
-```powershell
-cd C:\Users\Public\Documents\cluster_conf_script
-
-.\install_cluster_mode_conf.ps1
-```
-
-If everything works well, you can close the powershell terminal now
-
-> If you encounter any error in this step. copy the error message and send to `datascience@casd.eu`
-
-## 5. Check the hdfs client access
+## 4. Check the hdfs client access
 
 Open a new `powershell` terminal, and run the below command
-
 
 ```shell
 # check the hdfs file system
 hdfs dfs -ls /
 
-# check user home folder, replace your_user_name by your current D1MUTUA user name.
-hdfs dfs -ls /users/your_user_name
+# check user home folder, replace your_user_name by your current D1MUTUA user name(e.g. D1MUTUA_P_LIU0000).
+hdfs dfs -ls /users/<your_user_name>
 
-# for example, for /users/D1MUTUA_P_LIU0000, the expected output for user D1MUTUA_P_LIU0000
+# for the first time, if you have not upload any data, the output will be empty.
+
+# If you already have data, for example, for /users/D1MUTUA_P_LIU0000, you should see the below output
 -rw-------+  3 D1MUTUA_P_LIU0000 hadoop         76 2026-03-06 11:18 /users/D1MUTUA_P_LIU0000/stats.csv
 drwx------+  - D1MUTUA_P_LIU0000 hadoop          0 2026-03-10 17:16 /users/D1MUTUA_P_LIU0000/tmp
 ```
+
+> You can only access your own home folder. If you try to access the home folder of other users, you should see `Permission denied` error.
 
 You can also try to access the project folder
 
@@ -97,37 +86,66 @@ hdfs dfs -ls /projects
 hdfs dfs -ls /projects/BCL_EEC
 ```
 
-### 5.1 transfer data from local file system to hdfs cluster
+> If you are not in group `BCL_EEC`, you should see `Permission denied` error.
+
+
+### 4.1 The demo folder
+
+CASD has prepared some demo data and demo scripts to help user to use the spark cluster. To avoid conflicts between
+users, we require you to **copy this demo Folder to your personnel documents folder**.
+
+Use the same `powershell` terminal of the above section 4
+
+```powershell
+# copy demo folder
+Copy-Item -Path "C:\Users\Public\Documents\demo" -Destination "$HOME\Documents" -Recurse
+
+# goto your personnel documents folder
+cd "$HOME\Documents\demo"
+
+# check if you have the demo folder
+ls
+```
+
+> You should see the contents of the demo folder in the output
+
+
+### 4.2 transfer data between TS-D1MUTUA and HDFS cluster
 
 As `spark` is a framework for distributed computing, the data must be also distributed. That's why `spark` can't use 
 data from the local file system of `TS-D1MUTUA` server. As a result, we must transfer data from `local file system` 
 to `hdfs cluster`
 
-Use the same `powershell` terminal of section 5. 
+Use the same `powershell` terminal of the above section 4.1 
 
 ```shell
-# go to public folder of `TS-D1MUTUA` server
-cd C:\Users\Public\Documents\demo
-
 # check data in the local file system
-ls data
+ls 01-hdfs
 
 # you should see stats.csv in the output.
+# goto the 01-hdfs folder
+cd 01-hdfs
 
 # now upload data  from `local file system` to `hdfs cluster`
-hdfs dfs -put stats.csv /users/$USER/
+# replace your_user_name by your current D1MUTUA user name(e.g. D1MUTUA_P_LIU0000).
+hdfs dfs -put stats.csv /users/<your_user_name>/
 
 # check the data in hdfs
-hdfs dfs -ls /users/$USER
+hdfs dfs -ls /users/<your_user_name>/
 
 # download data from `hdfs cluster` to `local file system`
-# . means current folder in `local file system`
-hdfs dfs -get /users/$USER/stats.csv .
+# "$HOME\Documents" means the `Documents` folder in `TS-D1MUTUA`
+hdfs dfs -get /users/<your_user_name>/stats.csv "$HOME\Documents"
 ```
 
-## 6. Check the spark client access
+> The `TS-D1MUTUA` server is a Windows server, so the directory separator is `\`, the HDFS cluster servers
+> are Linux servers, so the directory separator is `/`. When your data is in HDFS, use `/`, if your data is in 
+> `TS-D1MUTUA`, use `\`.
 
-First check if you have spark installed in your environment. Use the same terminal of section 4.1.
+
+## 5. Check the spark client access
+
+First check if you have spark installed correctly in your environment. Use the same `Powershell terminal of section 4.1`.
 
 ```shell
 # check current spark runtime version
@@ -138,19 +156,17 @@ Welcome to
       ____              __
      / __/__  ___ _____/ /__
     _\ \/ _ \/ _ `/ __/  '_/
-   /___/ .__/\_,_/_/ /_/\_\   version 3.5.7
+   /___/ .__/\_,_/_/ /_/\_\   version 4.1.3
       /_/
                         
-Using Scala version 2.12.18, OpenJDK 64-Bit Server VM, 11.0.30
+Using Scala version 2.13.17, OpenJDK 64-Bit Server VM, 17.0.18
 Branch HEAD
-Compiled by user runner on 2025-09-17T20:37:30Z
-Revision ed00d046951a7ecda6429accd3b9c5b2dc792b65
-Url https://github.com/apache/spark
-Type --help for more information.
+Compiled by user on 2026-07-12T02:17:43Z
+...
 
 ```
 
-### 6.1 Create and submit a spark job
+### 5.1 Create and submit a spark job
 
 > Go to your document folder and create a file called `my_job.py`, then put the below code in it
 
