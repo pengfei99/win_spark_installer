@@ -1,3 +1,6 @@
+install.packages("sparklyr")
+install.packages("dplyr")
+
 # Dynamically extract the current username
 current_user <- Sys.info()[["user"]]
 message(sprintf("Running Spark session for OS User: %s", current_user))
