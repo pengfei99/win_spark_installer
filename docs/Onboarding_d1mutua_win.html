@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Onboarding_d1mutua_win.md</title>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+
+<style>
+/* https://github.com/microsoft/vscode/blob/master/extensions/markdown-language-features/media/markdown.css */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body {
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+	padding: 0 26px;
+	line-height: var(--vscode-markdown-line-height, 22px);
+	word-wrap: break-word;
+}
+
+#code-csp-warning {
+	position: fixed;
+	top: 0;
+	right: 0;
+	color: white;
+	margin: 16px;
+	text-align: center;
+	font-size: 12px;
+	font-family: sans-serif;
+	background-color:#444444;
+	cursor: pointer;
+	padding: 6px;
+	box-shadow: 1px 1px 1px rgba(0,0,0,.25);
+}
+
+#code-csp-warning:hover {
+	text-decoration: none;
+	background-color:#007acc;
+	box-shadow: 2px 2px 2px rgba(0,0,0,.25);
+}
+
+body.scrollBeyondLastLine {
+	margin-bottom: calc(100vh - 22px);
+}
+
+body.showEditorSelection .code-line {
+	position: relative;
+}
+
+body.showEditorSelection .code-active-line:before,
+body.showEditorSelection .code-line:hover:before {
+	content: "";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: -12px;
+	height: 100%;
+}
+
+body.showEditorSelection li.code-active-line:before,
+body.showEditorSelection li.code-line:hover:before {
+	left: -30px;
+}
+
+.vscode-light.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+
+.vscode-light.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.40);
+}
+
+.vscode-light.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-dark.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.vscode-dark.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.60);
+}
+
+.vscode-dark.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-high-contrast.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 160, 0, 0.7);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 160, 0, 1);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+img {
+	max-width: 100%;
+	max-height: 100%;
+}
+
+a {
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid -webkit-focus-ring-color;
+	outline-offset: -1px;
+}
+
+hr {
+	border: 0;
+	height: 2px;
+	border-bottom: 2px solid;
+}
+
+h1 {
+	padding-bottom: 0.3em;
+	line-height: 1.2;
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+}
+
+h1, h2, h3 {
+	font-weight: normal;
+}
+
+table {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th {
+	text-align: left;
+	border-bottom: 1px solid;
+}
+
+table > thead > tr > th,
+table > thead > tr > td,
+table > tbody > tr > th,
+table > tbody > tr > td {
+	padding: 5px 10px;
+}
+
+table > tbody > tr + tr > td {
+	border-top: 1px solid;
+}
+
+blockquote {
+	margin: 0 7px 0 5px;
+	padding: 0 16px 0 10px;
+	border-left-width: 5px;
+	border-left-style: solid;
+}
+
+code {
+	font-family: Menlo, Monaco, Consolas, "Droid Sans Mono", "Courier New", monospace, "Droid Sans Fallback";
+	font-size: 1em;
+	line-height: 1.357em;
+}
+
+body.wordWrap pre {
+	white-space: pre-wrap;
+}
+
+pre:not(.hljs),
+pre.hljs code > div {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
+pre code {
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
+}
+
+/** Theming */
+
+.vscode-light pre {
+	background-color: rgba(220, 220, 220, 0.4);
+}
+
+.vscode-dark pre {
+	background-color: rgba(10, 10, 10, 0.4);
+}
+
+.vscode-high-contrast pre {
+	background-color: rgb(0, 0, 0);
+}
+
+.vscode-high-contrast h1 {
+	border-color: rgb(0, 0, 0);
+}
+
+.vscode-light table > thead > tr > th {
+	border-color: rgba(0, 0, 0, 0.69);
+}
+
+.vscode-dark table > thead > tr > th {
+	border-color: rgba(255, 255, 255, 0.69);
+}
+
+.vscode-light h1,
+.vscode-light hr,
+.vscode-light table > tbody > tr + tr > td {
+	border-color: rgba(0, 0, 0, 0.18);
+}
+
+.vscode-dark h1,
+.vscode-dark hr,
+.vscode-dark table > tbody > tr + tr > td {
+	border-color: rgba(255, 255, 255, 0.18);
+}
+
+</style>
+
+<style>
+/* Tomorrow Theme */
+/* http://jmblog.github.com/color-themes-for-google-code-highlightjs */
+/* Original theme - https://github.com/chriskempson/tomorrow-theme */
+
+/* Tomorrow Comment */
+.hljs-comment,
+.hljs-quote {
+	color: #8e908c;
+}
+
+/* Tomorrow Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-regexp,
+.hljs-deletion {
+	color: #c82829;
+}
+
+/* Tomorrow Orange */
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params,
+.hljs-meta,
+.hljs-link {
+	color: #f5871f;
+}
+
+/* Tomorrow Yellow */
+.hljs-attribute {
+	color: #eab700;
+}
+
+/* Tomorrow Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: #718c00;
+}
+
+/* Tomorrow Blue */
+.hljs-title,
+.hljs-section {
+	color: #4271ae;
+}
+
+/* Tomorrow Purple */
+.hljs-keyword,
+.hljs-selector-tag {
+	color: #8959a8;
+}
+
+.hljs {
+	display: block;
+	overflow-x: auto;
+	color: #4d4d4c;
+	padding: 0.5em;
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: bold;
+}
+</style>
+
+<style>
+/*
+ * Markdown PDF CSS
+ */
+
+ body {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+	padding: 0 12px;
+}
+
+pre {
+	background-color: #f8f8f8;
+	border: 1px solid #cccccc;
+	border-radius: 3px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+pre:not(.hljs) {
+	padding: 23px;
+	line-height: 19px;
+}
+
+blockquote {
+	background: rgba(127, 127, 127, 0.1);
+	border-color: rgba(0, 122, 204, 0.5);
+}
+
+.emoji {
+	height: 1.4em;
+}
+
+code {
+	font-size: 14px;
+	line-height: 19px;
+}
+
+/* for inline code */
+:not(pre):not(.hljs) > code {
+	color: #C9AE75; /* Change the old color so it seems less like an error */
+	font-size: inherit;
+}
+
+/* Page Break : use <div class="page"/> or <div class="page"></div> to insert page break
+-------------------------------------------------------- */
+.page {
+	page-break-after: always;
+}
+
+</style>
+
+<script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')
+          ? 'dark'
+          : 'default'
+    });
+  </script>
+<h1 id="casd-sparkhdfs-cluster-onboarding">CASD spark/hdfs cluster onboarding</h1>
+<p>This tutorial aims to help you to be familiar on how to use spark/hdfs cluster inside bulle D1MUTUA.</p>
+<p>We will follow the below steps in this tutorial.</p>
+<ul>
+<li>understand the general architecture of the cluster</li>
+<li>check web interface access of the cluster</li>
+<li>check hdfs client of the cluster</li>
+<li>check spark client of the cluster</li>
+<li>check sparklyr client of the cluster</li>
+</ul>
+<h2 id="1-architecture-of-the-cluster">1. Architecture of the cluster</h2>
+<p>The below figure shows the general architecture of the cluster</p>
+<p><img src="../imgs/drees_cluster_archi_v3.png" alt="architecture.png" title="width=70%"></p>
+<ul>
+<li>The <code>TS-D1MUTUA</code>: is the main server(Windows) which you connect to via the <code>SD-BOX</code>.</li>
+<li>The <code>d1mutua-m01, d1mutua-w01/w02/w03/w04/w05</code>: are the servers which form the spark/hdfs cluster. The end users can not access
+them directly, but through spark/hdfs client which are installed/configured on <code>TS-D1MUTUA</code>.</li>
+</ul>
+<h2 id="2-check-web-interface-access-of-the-cluster">2. Check web interface access of the cluster</h2>
+<p>This step happens inside the <code>TS-D1MUTUA</code> server (Windows).</p>
+<p>You can visit the following url by using the <code>Firefox</code> web browser.</p>
+<ul>
+<li><a href="https://d1mutua-m01.casd.fr:50470/explorer.html">hdfs web interface</a> : is the web interface which allows users to view directories and data in the hdfs cluster.</li>
+<li><a href="https://d1mutua-m01.casd.fr:8090/cluster">spark web interface</a> : is the web interface which allows users to view spark jobs and available resources of the cluster.</li>
+</ul>
+<blockquote>
+<p>There is a shortcut created in <code>Bureau</code>-&gt;<code>Raccourcis</code>-&gt;<code>Cluster</code>. You only need to double-click on it. A <code>Firefox</code> web browser
+will be opened automatically.</p>
+<p>The first connection may take few seconds, because of the kerberos ticket and user groups checking.
+You may also need to accept the certificat if you see warnings.</p>
+</blockquote>
+<h2 id="3-install-spark-hdfs-client">3. Install Spark, HDFS client</h2>
+<p>To facilitate the installation of Spark and HDFS client, CASD has developed an installation script.</p>
+<p>You can find this script in <code>C:\RO_Cluster\install_spark.ps1</code>.</p>
+<p>Open a <code>powershell terminal</code>, and run the below command</p>
+<pre class="hljs"><code><div><span class="hljs-built_in">cd</span> C:\RO_Cluster
+
+<span class="hljs-comment">#run the installation script</span>
+ .\install_spark.ps1
+</div></code></pre>
+<blockquote>
+<p>After this step, you will be prompted with two questions:</p>
+<ol>
+<li>which spark version you want to install? choose 4.1.3</li>
+<li>Confirm you choice.
+If you encounter any error in this step. copy the error message and send to <code>datascience@casd.eu</code></li>
+</ol>
+</blockquote>
+<h2 id="4-check-the-hdfs-client-access">4. Check the hdfs client access</h2>
+<p>Open a new <code>powershell</code> terminal, and run the below command</p>
+<pre class="hljs"><code><div><span class="hljs-meta prompt_"># </span><span class="language-bash">check the hdfs file system</span>
+hdfs dfs -ls /
+<span class="hljs-meta prompt_">
+# </span><span class="language-bash">check user home folder, replace your_user_name by your current D1MUTUA user name(e.g. D1MUTUA_P_LIU0000).</span>
+hdfs dfs -ls /users/&lt;your_user_name&gt;
+<span class="hljs-meta prompt_">
+# </span><span class="language-bash"><span class="hljs-keyword">for</span> the first <span class="hljs-keyword">time</span>, <span class="hljs-keyword">if</span> you have not upload any data, the output will be empty.</span>
+<span class="hljs-meta prompt_">
+# </span><span class="language-bash">If you already have data, <span class="hljs-keyword">for</span> example, <span class="hljs-keyword">for</span> /users/D1MUTUA_P_LIU0000, you should see the below output</span>
+-rw-------+  3 D1MUTUA_P_LIU0000 hadoop         76 2026-03-06 11:18 /users/D1MUTUA_P_LIU0000/stats.csv
+drwx------+  - D1MUTUA_P_LIU0000 hadoop          0 2026-03-10 17:16 /users/D1MUTUA_P_LIU0000/tmp
+</div></code></pre>
+<blockquote>
+<p>You can only access your own home folder. If you try to access the home folder of other users, you should see <code>Permission denied</code> error.</p>
+</blockquote>
+<p>You can also try to access the project folder</p>
+<pre class="hljs"><code><div><span class="hljs-meta prompt_"># </span><span class="language-bash">check the projects folder</span>
+hdfs dfs -ls /projects
+<span class="hljs-meta prompt_">
+# </span><span class="language-bash">try to access a project</span> 
+hdfs dfs -ls /projects/BCL_EEC
+</div></code></pre>
+<blockquote>
+<p>If you are not in group <code>BCL_EEC</code>, you should see <code>Permission denied</code> error.</p>
+</blockquote>
+<h3 id="41-the-demo-folder">4.1 The demo folder</h3>
+<p>CASD has prepared some demo data and demo scripts to help user to use the spark cluster. To avoid conflicts between
+users, we require you to <strong>copy this demo Folder to your personnel documents folder</strong>.</p>
+<p>Use the same <code>powershell</code> terminal of the above section 4</p>
+<pre class="hljs"><code><div><span class="hljs-comment"># copy demo folder</span>
+<span class="hljs-built_in">Copy-Item</span> <span class="hljs-literal">-Path</span> <span class="hljs-string">&quot;C:\Users\Public\Documents\demo&quot;</span> <span class="hljs-literal">-Destination</span> <span class="hljs-string">&quot;<span class="hljs-variable">$HOME</span>\Documents&quot;</span> <span class="hljs-literal">-Recurse</span>
+
+<span class="hljs-comment"># goto your personnel documents folder</span>
+<span class="hljs-built_in">cd</span> <span class="hljs-string">&quot;<span class="hljs-variable">$HOME</span>\Documents\demo&quot;</span>
+
+<span class="hljs-comment"># check if you have the demo folder</span>
+<span class="hljs-built_in">ls</span>
+</div></code></pre>
+<blockquote>
+<p>You should see the contents of the demo folder in the output</p>
+</blockquote>
+<h3 id="42-transfer-data-between-ts-d1mutua-and-hdfs-cluster">4.2 transfer data between TS-D1MUTUA and HDFS cluster</h3>
+<p>As <code>spark</code> is a framework for distributed computing, the data must be also distributed. That's why <code>spark</code> can't use
+data from the local file system of <code>TS-D1MUTUA</code> server. As a result, we must transfer data from <code>local file system</code>
+to <code>hdfs cluster</code></p>
+<p>Use the same <code>powershell</code> terminal of the above section 4.1</p>
+<pre class="hljs"><code><div><span class="hljs-meta prompt_"># </span><span class="language-bash">check data <span class="hljs-keyword">in</span> the <span class="hljs-built_in">local</span> file system</span>
+ls 01-hdfs
+<span class="hljs-meta prompt_">
+# </span><span class="language-bash">you should see stats.csv <span class="hljs-keyword">in</span> the output.</span>
+<span class="hljs-meta prompt_"># </span><span class="language-bash">goto the 01-hdfs folder</span>
+cd 01-hdfs
+<span class="hljs-meta prompt_">
+# </span><span class="language-bash">now upload data  from `<span class="hljs-built_in">local</span> file system` to `hdfs cluster`</span>
+<span class="hljs-meta prompt_"># </span><span class="language-bash">replace your_user_name by your current D1MUTUA user name(e.g. D1MUTUA_P_LIU0000).</span>
+hdfs dfs -put stats.csv /users/&lt;your_user_name&gt;/
+<span class="hljs-meta prompt_">
+# </span><span class="language-bash">check the data <span class="hljs-keyword">in</span> hdfs</span>
+hdfs dfs -ls /users/&lt;your_user_name&gt;/
+<span class="hljs-meta prompt_">
+# </span><span class="language-bash">download data from `hdfs cluster` to `<span class="hljs-built_in">local</span> file system`</span>
+<span class="hljs-meta prompt_"># </span><span class="language-bash"><span class="hljs-string">&quot;<span class="hljs-variable">$HOME</span>\Documents&quot;</span> means the `Documents` folder <span class="hljs-keyword">in</span> `TS-D1MUTUA`</span>
+hdfs dfs -get /users/&lt;your_user_name&gt;/stats.csv &quot;$HOME\Documents&quot;
+</div></code></pre>
+<blockquote>
+<p>The <code>TS-D1MUTUA</code> server is a Windows server, so the directory separator is <code>\</code>, the HDFS cluster servers
+are Linux servers, so the directory separator is <code>/</code>. When your data is in HDFS, use <code>/</code>, if your data is in
+<code>TS-D1MUTUA</code>, use <code>\</code>.</p>
+</blockquote>
+<h2 id="5-check-the-spark-client-access">5. Check the spark client access</h2>
+<p>In this section, we will test if you can use the spark client to connect to the cluster.
+Use the same <code>Powershell terminal of section 4.1</code>.</p>
+<p>First check if you have spark installed correctly in your environment.</p>
+<pre class="hljs"><code><div><span class="hljs-meta prompt_"># </span><span class="language-bash">check current spark runtime version</span>
+spark-submit --version
+<span class="hljs-meta prompt_">
+# </span><span class="language-bash">you should see the below output</span>
+Welcome to
+      ____              __
+     / __/__  ___ _____/ /__
+    _\ \/ _ \/ _ `/ __/  &#x27;_/
+   /___/ .__/\_,_/_/ /_/\_\   version 4.1.3
+      /_/
+                        
+Using Scala version 2.13.17, OpenJDK 64-Bit Server VM, 17.0.18
+Branch HEAD
+Compiled by user on 2026-07-12T02:17:43Z
+...
+
+</div></code></pre>
+<h3 id="51-create-and-submit-a-spark-job">5.1 Create and submit a spark job</h3>
+<p>We already created a pyspark job in <code>demo\02-spark-submit</code>, it's called <code>job1.py</code>.</p>
+<pre class="hljs"><code><div><span class="hljs-comment"># go to the 02-spark-submit folder</span>
+<span class="hljs-built_in">cd</span> <span class="hljs-string">&quot;<span class="hljs-variable">$HOME</span>\Documents\demo\02-spark-submit&quot;</span>
+
+<span class="hljs-comment"># you can view the content of the job1.py</span>
+<span class="hljs-built_in">cat</span> .\job1.py
+</div></code></pre>
+<p>To submit this job to the cluster, you need to run the below command</p>
+<pre class="hljs"><code><div><span class="hljs-meta prompt_"># </span><span class="language-bash">don<span class="hljs-string">&#x27;t forget to replace your_name</span></span>
+spark-submit --master yarn --deploy-mode cluster --name=test_spark_submit_&lt;your_name&gt; job1.py
+</div></code></pre>
+<blockquote>
+<p>You can notice in the above <code>spark-submit</code> command, there are two important options</p>
+<ul>
+<li>master is yarn : yarn is the resource manager(which job run on which worker).</li>
+<li>deploy-mode cluster: spark driver will also run on the cluster side. So nothing runs inside
+<code>TS-D1MUTUA</code> server. As a result, you don't need to activate python environment and pyspark
+You can check the status of your job via <a href="https://d1mutua-hdp-m01.casd.fr:8090/cluster">yarn web UI</a>.
+We will see how to <code>run spark in client mode</code> in the next section.</li>
+</ul>
+</blockquote>
+<blockquote>
+<p><strong>The spark-submit only works in Powershell terminal</strong>.</p>
+</blockquote>
+<blockquote>
+<p>To make the cluster token management is completely transparent for the end user, CASD has written
+a script which overwrites the origin <code>spark-submit</code> command. This script is only activated in Powershell.
+As a result, the <code>spark-submit</code> command will ont work in <code>CMD terminal</code> .</p>
+</blockquote>
+<h3 id="52-use-pyspark-to-connect-to-the-spark-cluster-in-interactive-mode">5.2 Use pySpark to connect to the spark cluster in interactive mode</h3>
+<p>We have seen how to submit jobs to the cluster. For exploring data, you may want to run your spark job interactively(client mode).
+In this mode the <code>spark driver</code> runs on <code>TS-D1MUTUA</code> server. So we need to install a <code>python virtual environment and pyspark</code></p>
+<p>To do so, we need to open an <code>anaconda terminal</code>. Goto <code>Raccourcis</code>-&gt; <code>Python</code>, double-click on <code>Miniconda Prompt Python3.13</code>,
+you should see a popup <code>anaconda terminal</code>. Now you can run the below command to create a <code>python virtual environment</code>.</p>
+<pre class="hljs"><code><div><span class="hljs-meta prompt_"># </span><span class="language-bash">check your python version</span>
+python -V
+<span class="hljs-meta prompt_">
+# </span><span class="language-bash">create a virtual <span class="hljs-built_in">env</span> with the current python interpreter version</span>
+conda create -n spark_venv python --offline
+<span class="hljs-meta prompt_">
+# </span><span class="language-bash">list all existing virtual <span class="hljs-built_in">env</span></span>
+conda env list
+<span class="hljs-meta prompt_">
+# </span><span class="language-bash">you should see spark_venv <span class="hljs-keyword">in</span> the output</span>
+<span class="hljs-meta prompt_">
+# </span><span class="language-bash">activate the python virtual venv</span>
+conda activate spark_venv
+<span class="hljs-meta prompt_">
+# </span><span class="language-bash">check installed libs</span>
+pip list
+<span class="hljs-meta prompt_">
+# </span><span class="language-bash">install pyspark, the pyspark version must match the spark version <span class="hljs-keyword">in</span> the cluster</span>
+pip install pyspark==4.1.3
+<span class="hljs-meta prompt_">
+# </span><span class="language-bash">install jupyterlab</span>
+pip install jupyterlab
+</div></code></pre>
+<p>Now you have all the required dependencies to use spark cluster in interactive mode with <code>pyspark</code>.</p>
+<blockquote>
+<p>The <code>conda</code> command only visible in <code>anaconda terminal</code>. If you open a <code>powershell</code> or <code>cmd</code> terminal, the command <code>conda</code>
+does not exit inside them. So if you want to use <strong>python virtual environment</strong>, you need to
+goto <code>Raccourcis</code>-&gt; <code>Python</code>, double-click on <code>Miniconda Prompt Python3.13</code>, to open an <code>anaconda terminal</code>.</p>
+</blockquote>
+<p>To check if your installation is successful or not, let's close the existing <code>Miniconda Prompt Python3.13</code>, and open
+a new one.</p>
+<pre class="hljs"><code><div><span class="hljs-comment"># goto your Documents\demo\03-notebooks</span>
+<span class="hljs-built_in">cd</span> Documents\demo\<span class="hljs-number">03</span><span class="hljs-literal">-notebooks</span>
+
+<span class="hljs-comment"># if you open a new `anaconda terminal`, don&#x27;t forget to activate the `virtual environment(e.g. spark_venv)` </span>
+conda activate spark_venv
+
+<span class="hljs-comment"># if you are already in the activated `virtual environment(e.g. spark_venv)`, you can run the below command</span>
+<span class="hljs-comment"># to open a jupyter lab.</span>
+jupyter lab <span class="hljs-literal">--port</span>=<span class="hljs-number">0</span>
+
+<span class="hljs-comment"># In the GUI, create a new jupyter notebook and copy the below code in it</span>
+</div></code></pre>
+<blockquote>
+<p>The option <code>--port=0</code> is very important. If you forget this option, you may see error messages <code>Port already in use</code>.
+Normally a browser will be launched automatically. If you don't see a browser, you can open a firefox and copy
+the jupyterlab url in the firefox.</p>
+</blockquote>
+<p>In the notebooks, you should find a jupyter notebook called <code>01.pyspark_read_write_hdfs.ipynb</code></p>
+<p>You can run the blocks one by one and check the outputs of the blocks</p>
+<p>The most important blocks are:</p>
+<ul>
+<li>importing CASD pyspark wrapper: The CASD pyspark wrapper take care of cluster authentication token automatically</li>
+<li>initiate spark session with CASD pyspark wrapper</li>
+<li>close the spark session</li>
+</ul>
+<p>The below code shows a simple code example</p>
+<pre class="hljs"><code><div><span class="hljs-comment">######### Import CASD pyspark wrapper ########</span>
+<span class="hljs-keyword">import</span> getpass
+<span class="hljs-keyword">import</span> sys
+<span class="hljs-keyword">from</span> pathlib <span class="hljs-keyword">import</span> Path
+
+<span class="hljs-comment"># Add CASD custom library path before imports</span>
+CASD_LIB_PATH = Path.home() / <span class="hljs-string">&quot;AppData&quot;</span> / <span class="hljs-string">&quot;Local&quot;</span> / <span class="hljs-string">&quot;casd-tools&quot;</span> / <span class="hljs-string">&quot;casd-token-conf&quot;</span>
+
+<span class="hljs-comment"># check before launch</span>
+<span class="hljs-keyword">if</span> CASD_LIB_PATH.exists():
+    sys.path.append(<span class="hljs-built_in">str</span>(CASD_LIB_PATH))
+<span class="hljs-keyword">else</span>:
+    <span class="hljs-built_in">print</span>(<span class="hljs-string">f&quot;[WARNING] Custom library path does not exist: <span class="hljs-subst">{CASD_LIB_PATH}</span>&quot;</span>)
+    
+<span class="hljs-comment"># import casd spark wrapper</span>
+<span class="hljs-keyword">from</span> casd_spark <span class="hljs-keyword">import</span> get_spark
+
+<span class="hljs-comment">############### initiate spark driver  ##############</span>
+<span class="hljs-comment"># get user name</span>
+username = getpass.getuser()
+<span class="hljs-comment"># set spark job name</span>
+app_name = <span class="hljs-string">f&quot;test_pyspark_for_<span class="hljs-subst">{username}</span>&quot;</span>
+
+<span class="hljs-built_in">print</span>(<span class="hljs-string">f&quot;[INFO] Initializing Spark Session: <span class="hljs-subst">{app_name}</span>&quot;</span>)
+spark = get_spark(app_name=app_name)
+</div></code></pre>
+<p>The block 7 will write the result in CSV format in your hdfs home folder <code>/users/&lt;user-name&gt;/tmp/count_resu_csv</code></p>
+<p>The block 8 will write the result in Parquet format in your hdfs home folder <code>/users/&lt;user-name&gt;/tmp/count_resu_parquet</code></p>
+<p>The block 9 will do two import things:</p>
+<ol>
+<li>Close the connection between your spark client and spark cluster, hence free all the reserved resource in the cluster.</li>
+<li>Revoke the authentication token which allows you to connect to the cluster. It means you cannot create a new spark session
+on the cluster anymore. To generate a new authentication token, you need to click on the <code>Restart the kernel</code> button.</li>
+</ol>
+<h3 id="53-use-sparklyr-to-connect-to-the-spark-cluster-in-interactive-mode">5.3 Use sparklyr to connect to the spark cluster in interactive mode()</h3>
+<p>To use sparklyr with the kerberos authentication in Windows, we also need a CASD sparklyr wrapper. This wrapper takes
+care of the cluster authentication token lifecycle.</p>
+<p>You can find a complete R script in <code>Documents\demo\04-sparklyr</code>, which allows you to create a spark session with sparklyr
+on the cluster and read data from HDFS, and write results on the HDFS</p>
+<p>This script has four important blocks</p>
+<ul>
+<li>Importing CASD sparklyr wrapper</li>
+<li>Configure spark session parameters(e.g. worker number, CPU and memory per worker, etc.)</li>
+<li>Initiate spark session with CASD sparklyr wrapper</li>
+<li>Close the spark session</li>
+</ul>
+<p>The below R script shows how to import CASD sparklyr wrapper</p>
+<pre class="hljs"><code><div><span class="hljs-comment"># The wrapper reqires the below packages, you only need to install it once</span>
+install.packages<span class="hljs-punctuation">(</span><span class="hljs-string">&quot;sparklyr&quot;</span><span class="hljs-punctuation">)</span>
+install.packages<span class="hljs-punctuation">(</span><span class="hljs-string">&quot;dplyr&quot;</span><span class="hljs-punctuation">)</span>
+
+<span class="hljs-comment"># Dynamically extract the current username</span>
+current_user <span class="hljs-operator">&lt;-</span> Sys.info<span class="hljs-punctuation">(</span><span class="hljs-punctuation">)</span><span class="hljs-punctuation">[[</span><span class="hljs-string">&quot;user&quot;</span><span class="hljs-punctuation">]</span><span class="hljs-punctuation">]</span>
+message<span class="hljs-punctuation">(</span>sprintf<span class="hljs-punctuation">(</span><span class="hljs-string">&quot;Running Spark session for OS User: %s&quot;</span><span class="hljs-punctuation">,</span> current_user<span class="hljs-punctuation">)</span><span class="hljs-punctuation">)</span>
+
+<span class="hljs-comment"># Construct CASD sparklyr wrapper path</span>
+casd_conf_path <span class="hljs-operator">&lt;-</span> file.path<span class="hljs-punctuation">(</span>
+  <span class="hljs-string">&quot;C:&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-string">&quot;Users&quot;</span><span class="hljs-punctuation">,</span> current_user<span class="hljs-punctuation">,</span> <span class="hljs-string">&quot;AppData&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-string">&quot;Local&quot;</span><span class="hljs-punctuation">,</span> 
+   <span class="hljs-string">&quot;casd-tools&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-string">&quot;casd-token-conf&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-string">&quot;casd_spark.R&quot;</span>
+<span class="hljs-punctuation">)</span>
+<span class="hljs-comment"># import CASD sparklyr wrapper</span>
+<span class="hljs-keyword">if</span> <span class="hljs-punctuation">(</span>file.exists<span class="hljs-punctuation">(</span>casd_conf_path<span class="hljs-punctuation">)</span><span class="hljs-punctuation">)</span> <span class="hljs-punctuation">{</span>
+  source<span class="hljs-punctuation">(</span>casd_conf_path<span class="hljs-punctuation">,</span> encoding <span class="hljs-operator">=</span> <span class="hljs-string">&quot;UTF-8&quot;</span><span class="hljs-punctuation">)</span>
+<span class="hljs-punctuation">}</span> <span class="hljs-keyword">else</span> <span class="hljs-punctuation">{</span>
+  stop<span class="hljs-punctuation">(</span>sprintf<span class="hljs-punctuation">(</span><span class="hljs-string">&quot;Configuration script not found at expected path: %s&quot;</span><span class="hljs-punctuation">,</span> casd_conf_path<span class="hljs-punctuation">)</span><span class="hljs-punctuation">)</span>
+<span class="hljs-punctuation">}</span>
+<span class="hljs-comment"># import the required package</span>
+library<span class="hljs-punctuation">(</span>sparklyr<span class="hljs-punctuation">)</span>
+library<span class="hljs-punctuation">(</span>dplyr<span class="hljs-punctuation">)</span>
+</div></code></pre>
+<p>Now we need to configure the cluster parameters</p>
+<pre class="hljs"><code><div><span class="hljs-comment"># Safe connection state tracking</span>
+sc <span class="hljs-operator">&lt;-</span> <span class="hljs-literal">NULL</span>
+
+<span class="hljs-comment"># Ensure YARN application containers are cleaned up even if the script throws an error</span>
+<span class="hljs-built_in">on.exit</span><span class="hljs-punctuation">(</span><span class="hljs-punctuation">{</span>
+  <span class="hljs-keyword">if</span> <span class="hljs-punctuation">(</span><span class="hljs-operator">!</span><span class="hljs-built_in">is.null</span><span class="hljs-punctuation">(</span>sc<span class="hljs-punctuation">)</span> <span class="hljs-operator">&amp;&amp;</span> connection_is_open<span class="hljs-punctuation">(</span>sc<span class="hljs-punctuation">)</span><span class="hljs-punctuation">)</span> <span class="hljs-punctuation">{</span>
+    message<span class="hljs-punctuation">(</span><span class="hljs-string">&quot;Closing Spark connection and releasing YARN resources...&quot;</span><span class="hljs-punctuation">)</span>
+    casd_spark_disconnect<span class="hljs-punctuation">(</span>sc<span class="hljs-punctuation">)</span>
+  <span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span> add <span class="hljs-operator">=</span> <span class="hljs-literal">TRUE</span><span class="hljs-punctuation">)</span>
+
+<span class="hljs-comment"># ==============================================================================</span>
+<span class="hljs-comment"># 1. Cluster Configuration &amp; Network Settings</span>
+<span class="hljs-comment"># ==============================================================================</span>
+config <span class="hljs-operator">&lt;-</span> spark_config<span class="hljs-punctuation">(</span><span class="hljs-punctuation">)</span>
+
+<span class="hljs-comment"># YARN Resource Allocation</span>
+config<span class="hljs-operator">$</span>spark.executor.instances <span class="hljs-operator">&lt;-</span> 2
+config<span class="hljs-operator">$</span>spark.executor.cores     <span class="hljs-operator">&lt;-</span> 1
+config<span class="hljs-operator">$</span>spark.executor.memory    <span class="hljs-operator">&lt;-</span> <span class="hljs-string">&quot;2g&quot;</span>
+config<span class="hljs-operator">$</span>spark.driver.memory      <span class="hljs-operator">&lt;-</span> <span class="hljs-string">&quot;2g&quot;</span>
+
+<span class="hljs-comment"># Network &amp; Connectivity</span>
+config<span class="hljs-operator">$</span>spark.driver.bindAddress <span class="hljs-operator">&lt;-</span> <span class="hljs-string">&quot;0.0.0.0&quot;</span>
+config<span class="hljs-operator">$</span>spark.submit.deployMode  <span class="hljs-operator">&lt;-</span> <span class="hljs-string">&quot;client&quot;</span>
+
+
+<span class="hljs-comment"># Security Tokens for HDFS and Hive metastore delegation</span>
+config<span class="hljs-operator">$</span>spark.yarn.security.tokens.hdfs.enabled <span class="hljs-operator">&lt;-</span> <span class="hljs-string">&quot;true&quot;</span>
+config<span class="hljs-operator">$</span>spark.yarn.security.tokens.hive.enabled <span class="hljs-operator">&lt;-</span> <span class="hljs-string">&quot;true&quot;</span>
+</div></code></pre>
+<p>Now we have all we need to initiate a spark session, let's start our spark session. This may take few seconds, please be
+patient.</p>
+<pre class="hljs"><code><div><span class="hljs-comment"># Establish YARN Connection</span>
+sc <span class="hljs-operator">&lt;-</span> casd_spark_connect<span class="hljs-punctuation">(</span>master <span class="hljs-operator">=</span> <span class="hljs-string">&quot;yarn&quot;</span><span class="hljs-punctuation">,</span> config <span class="hljs-operator">=</span> config<span class="hljs-punctuation">)</span>
+</div></code></pre>
+<blockquote>
+<p>You may see some error messages about when sparklyr updating Rstudio connection pane: Rstudio can't find log file <code>logs/log4j.spark.log</code>
+This error message does not impact the execution of your sparklyr code, you can just ignore it</p>
+</blockquote>
+<p>Once the spark session is created, you can do your usual sparklyr data analysis, this is zero syntaxe change.</p>
+<p>After you finish your analysis, you need to close your spark session. Otherwise, the reserved resource will never be
+freed.</p>
+<pre class="hljs"><code><div><span class="hljs-comment"># close the spark session and free the resources</span>
+casd_spark_disconnect<span class="hljs-punctuation">(</span>sc<span class="hljs-punctuation">)</span>
+</div></code></pre>
+<blockquote>
+<p>If you want to restart a spark session, you need to restart the R kernel to generate a new cluster authentication token.</p>
+</blockquote>
+
+</body>
+</html>

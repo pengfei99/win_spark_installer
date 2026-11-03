@@ -1,4 +1,4 @@
-# # CASD spark/hdfs cluster onboarding
+# CASD spark/hdfs cluster onboarding
 
 This tutorial aims to help you to be familiar on how to use spark/hdfs cluster inside bulle D1MUTUA.
 
@@ -14,7 +14,7 @@ We will follow the below steps in this tutorial.
 
 The below figure shows the general architecture of the cluster
 
-![architecture.png](./imgs/drees_cluster_archi_v3.png "width=70%")
+![architecture.png](../imgs/drees_cluster_archi_v3.png "width=70%")
 
 - The `TS-D1MUTUA`: is the main server(Windows) which you connect to via the `SD-BOX`.
 - The `d1mutua-m01, d1mutua-w01/w02/w03/w04/w05`: are the servers which form the spark/hdfs cluster. The end users can not access 
