@@ -606,7 +606,7 @@ generate_casd_token <- function(timeout = CASD_DEFAULT_TIMEOUT) {
   # Mark generation as successful so on.exit() does not delete the file.
   success <- TRUE
 
-  message(sprintf("[OK] Spark YARN token generated: %s", dt_path))
+  message(sprintf("[OK] Spark YARN authentication token generated"))
 
   invisible(dt_path)
 }
