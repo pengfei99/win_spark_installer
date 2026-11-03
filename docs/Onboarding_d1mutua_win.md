@@ -17,7 +17,7 @@ The below figure shows the general architecture of the cluster
 ![architecture.png](../imgs/drees_cluster_archi_v3.png "width=70%")
 
 - The `TS-D1MUTUA`: is the main server(Windows) which you connect to via the `SD-BOX`.
-- The `d1mutua-m01, d1mutua-w01/w02/w03/w04/w05`: are the servers which form the spark/hdfs cluster. The end users can not access 
+- The `d1mutua-hdp-m01, d1mutua-hdp-w01/w02/w03/w04/w05`: are the servers which form the spark/hdfs cluster. The end users can not access 
     them directly, but through spark/hdfs client which are installed/configured on `TS-D1MUTUA`.
 
 ## 2. Check web interface access of the cluster
@@ -26,10 +26,10 @@ This step happens inside the `TS-D1MUTUA` server (Windows).
 
 You can visit the following url by using the `Firefox` web browser.
 
-- [hdfs web interface](https://d1mutua-m01.casd.fr:50470/explorer.html) : is the web interface which allows users to view directories and data in the hdfs cluster.
-- [spark web interface](https://d1mutua-m01.casd.fr:8090/cluster) : is the web interface which allows users to view spark jobs and available resources of the cluster. 
+- [hdfs web interface](https://d1mutua-hdp-m01.casd.fr:50470/explorer.html) : is the web interface which allows users to view directories and data in the hdfs cluster.
+- [spark web interface](https://d1mutua-hdp-m01.casd.fr:8090/cluster) : is the web interface which allows users to view spark jobs and available resources of the cluster. 
 
-> There is a shortcut created in `Bureau`->`Raccourcis`->`Cluster`. You only need to double-click on it. A `Firefox` web browser
+> There is a shortcut created in `Bureau`->`Raccourcis`->`Cluster_2026`. You only need to double-click on it. A `Firefox` web browser
 > will be opened automatically.
 >
 > The first connection may take few seconds, because of the kerberos ticket and user groups checking.
