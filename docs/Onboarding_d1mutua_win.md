@@ -27,7 +27,7 @@ This step happens inside the `TS-D1MUTUA` server (Windows).
 You can visit the following url by using the `Firefox` web browser.
 
 - [hdfs web interface](https://d1mutua-hdp-m01.casd.fr:50470/explorer.html) : is the web interface which allows users to view directories and data in the hdfs cluster.
-- [spark web interface](https://d1mutua-hdp-m01.casd.fr:8090/cluster) : is the web interface which allows users to view spark jobs and available resources of the cluster. 
+- [spark web interface](https://d1mutua-hdp-m01.casd.fr:8090/) : is the web interface which allows users to view spark jobs and available resources of the cluster. 
 
 > There is a shortcut created in `Bureau`->`Raccourcis`->`Cluster_2026`. You only need to double-click on it. A `Firefox` web browser
 > will be opened automatically.
