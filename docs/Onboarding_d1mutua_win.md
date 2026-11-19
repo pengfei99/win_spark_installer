@@ -563,11 +563,20 @@ With the above advantages, the client mode is more suitable for
   
 ## 10. Advance optimization
 
-Above all, spark is a distributed computing framework which depends on heavily how the data is partitioned. If the data
-partition is misconfigured, the computing efficiency will be heavily impacted.
 
-Let's resue the above example, 
-To make your spark job more efficient, 
+In a spark application, many actions(e.g. groupby, join, etc.) will trigger a data shuffling (redistributing data across executors)
+To make that redistribution possible and parallelizable, Spark must build a new set of data partitions for the next computing stage.
+The number of the data partition will heavily impact the spark computing efficiency.
+
+The default shuffle partitions number is 200, which may be disastrously wrong for some extreme cases. For small dataset(<10GB),
+200 partitions creates unnecessary overhead. Because to create a partition and a task to treat the partition requires
+extra CPU, memory and time. For large dataset(Terabytes), 200 partitions will crush your executors with massive memory blocks
+
+> The general rule is that each shuffle partition should contain roughly 100 MB to 200 MB of data 
 
 
-Adjusting Shuffle Partitions (spark.sql.shuffle.partitions)Default Trap: The default Spark configuration is 200 shuffle partitions, which is disastrously wrong for both extremes:For small data (<10 GB), 200 partitions creates unnecessary overhead; lower it (e.g., to 10–50).For large data (Terabytes), 200 partitions will crush your executors with massive memory blocks.Rule of Thumb: Aim for each shuffle partition to contain roughly 100 MB to 200 MB of data.Formula: $\text{Shuffle Partitions} = \frac{\text{Estimated Dataset Size post-shuffle}}{\text{128 MB}}$. (Alternatively, enable Adaptive Query Execution (AQE) via spark.sql.adaptive.enabled = true, which automatically coalesces shuffle partitions at runtime).
+Below is a formula to calculate the correct partition numbers.
+
+$\text{Shuffle Partitions} = \frac{\text{Estimated Dataset Size post-shuffle}}{\text{128 MB}}$. 
+
+> You can delegate this calculation to spark by `enable Adaptive Query Execution (AQE)` via `spark.sql.adaptive.enabled = true`.
