@@ -446,8 +446,69 @@ The block 9 will do two import things:
 2. Revoke the authentication token which allows you to connect to the cluster. It means you cannot create a new spark session
 on the cluster anymore. To generate a new authentication token, you need to click on the `Restart the kernel` button.
 
+## 8. How to size your spark session
 
-## 8. Client mode(sparklyr interactive) vs Cluster mode(spark-submit) 
+In this section, we explain several best practices for sizing your Spark session relative to your data volume.
+Before we start, let's understand some terms:
+- `worker node`: is a physical or virtual machine that provides CPUs, RAM, and local disk space. It can host `one or multiple executors`,
+       depending on how much CPU and memory the node has and how you configure your executor sizes.
+- `cluster manager`: is the `resource orchestrator` that sits between your Spark application (the Driver) and the underlying physical or virtual machines (Worker Nodes) 
+           in a distributed cluster. In our case, the cluster manager is `YARN`.
+- `executor`: is a distributed JVM process launched on a `worker node` for the lifetime of a Spark application. It stores 
+         cached/persisted data partitions in memory or on local disk, then executes individual tasks (each task typically processes one data partition) 
+            using a pool of threads corresponding to its assigned CPU cores
+- `driver`: is a process which translates user commands(e.g. R/Python scripts) into a DAG(Directed Acyclic Graph) of execution stages and tasks. Then
+ it schedules tasks onto executors and collects results or status updates back from them.
+
+The below figure shows the architecture of a spark application in client mode.
+
+![spark_archi_example.jpg](../imgs/spark_archi_example.jpg)
+
+### 8.1 General rules
+
+Below we list some general rules on how to size your spark session:
+- `data partition size`: The optimum data partition size should be between 100MB and 200MB. If your partitions are 
+        too small (<10 MB), task scheduling overhead will overwhelm processing time (the "small files problem"). 
+        If they are too large (>500 MB), you risk Out-Of-Memory (OOM) errors during shuffles. In our case, the data stored in
+     the HDFS has the default partition size 128MB.
+- `executor memory size`: Keep executor memory sizes between `32 GB and 64 GB`. Because executor is a JVM process, and the 
+        Java Garbage Collector (GC) struggles with heaps larger than 64 GB.  
+- `executor core size`: Keep executor core size between `2 and 6, commonly 4`. Giving an executor too many 
+         cores (e.g., 16+) creates high I/O contention on the local disk and network interfaces, and hurts HDFS 
+         client throughput. Giving it only 1 core destroys parallelism and multi-threading efficiency. 
+- `driver core and memory size`: In general the driver only collects metadata and coordinates tasks. So 4Gb to 8GB memory and 2 core
+        should be enough. It should `never brought large dataset(in the executor) back` via actions like `collect(), take()`
+         If you want check the intermediate results, you can use functions such as `head(5) or sdf_limit(5)` to collect
+         only the first 5 rows of the dataframe. If you have to collect the entire dataset, you need to increase the driver
+         memory accordingly. 
+
+
+### 8.2 A real world example
+
+In our case, we have 5 worker nodes, and each worker nodes has 8 cores and 150 GB RAM. Suppose we have two datasets 
+of 200GB each. We need to do an inner join between two and then a groupby + aggregation operations.
+
+To have the best execution efficiencies, we can use the below spark session sizing.
+
+```text
+# Executors (4 per node x 5 nodes = 20 executors, 40 total cores)
+spark.executor.instances                      = 20
+spark.executor.cores                          = 2
+spark.executor.memory                         = 24g
+spark.executor.memoryOverhead                 = 6g
+
+# Driver
+spark.driver.cores                            = 2
+spark.driver.memory                           = 8g
+
+```
+
+- Executor instance number: to maximize the parallelism, we reserve 2 core per executor, it means we can have 20 executor instances
+  (4 per worker node). It means we can have `40 tasks execution in parallem`.
+- Executor memory: normally 8GB memory for 1 core is enough, but our job need to do join and groupby which will lead wide shuffle, so we add another
+        4GB memory to avoid OOM(out off memory) error.
+
+## 9. Client mode(sparklyr interactive) vs Cluster mode(spark-submit) 
 
 We have presented the two major ways to use the spark cluster:
 - Interactive(client mode) : R via sparklyr, and python via pyspark
@@ -460,7 +521,7 @@ There are huge difference between the two modes, the below figure shows the arch
 You can notice that in client mode, the `spark driver process` runs on your local machine(e.g. `TS-D1MUTUA`), in cluster
 mode, all run on the cluster side(zero resource usage in `TS-D1MUTUA`).
 
-### 8.1 When to use spark-submit(Cluster mode) 
+### 9.1 When to use spark-submit(Cluster mode) 
 
 When working with an `Apache Spark cluster`, compare to an `interactive sparklyr session`, the batch deployment via `spark-submit` 
 offers several architectural, operational, and performance advantages.
@@ -483,7 +544,7 @@ With the above advantages, the cluster mode is more suitable for
 - `automated pipelines`: If your spark job is triggered by orchestrators like Apache Airflow, cron, or CI/CD pipelines.
 - `long-running job`: If your spark job take hours or days to finish, it's better to use cluster mode. 
 
-### 8.2 When to use sparklyr interactive
+### 9.2 When to use sparklyr interactive
 
 Client mode offers several distinct advantages, particularly during the data exploratory, data pipeline development, 
 and debugging phases:
@@ -499,22 +560,14 @@ With the above advantages, the client mode is more suitable for
 - `Local file system access`: If you need to read small local lookup tables, or write temporary artifacts directly to 
           your local workstation during a test run.
 
-## 9. How to size your spark session
-
-In this section, we explain several best practices for sizing your Spark session relative to your data volume.
-Before we start, let's understand some terms:
-- `worker node`: is a physical or virtual machine that provides CPUs, RAM, and local disk space. It can host `one or multiple executors`,
-       depending on how much CPU and memory the node has and how you configure your executor sizes.
-- `cluster manager`: is the `resource orchestrator` that sits between your Spark application (the Driver) and the underlying physical or virtual machines (Worker Nodes) 
-           in a distributed cluster. In our case, the cluster manager is 
-- `executor`: is a distributed JVM process launched on a `worker node` for the lifetime of a Spark application. It stores 
-         cached/persisted data partitions in memory or on local disk, then executes individual tasks (each task typically processes one data partition) 
-            using a pool of threads corresponding to its assigned CPU cores
-- `driver`: is a process which translates user commands(e.g. R/Python scripts) into a DAG(Directed Acyclic Graph) of execution stages and tasks. Then
- it schedules tasks onto executors and collects results or status updates back from them.
-
-
+  
 ## 10. Advance optimization
 
-Above all, spark is a distributed computing framework which depends on heavily the distributed storage framework(HDFS).
+Above all, spark is a distributed computing framework which depends on heavily how the data is partitioned. If the data
+partition is misconfigured, the computing efficiency will be heavily impacted.
+
+Let's resue the above example, 
 To make your spark job more efficient, 
+
+
+Adjusting Shuffle Partitions (spark.sql.shuffle.partitions)Default Trap: The default Spark configuration is 200 shuffle partitions, which is disastrously wrong for both extremes:For small data (<10 GB), 200 partitions creates unnecessary overhead; lower it (e.g., to 10–50).For large data (Terabytes), 200 partitions will crush your executors with massive memory blocks.Rule of Thumb: Aim for each shuffle partition to contain roughly 100 MB to 200 MB of data.Formula: $\text{Shuffle Partitions} = \frac{\text{Estimated Dataset Size post-shuffle}}{\text{128 MB}}$. (Alternatively, enable Adaptive Query Execution (AQE) via spark.sql.adaptive.enabled = true, which automatically coalesces shuffle partitions at runtime).
