@@ -142,8 +142,138 @@ hdfs dfs -get /users/<your_user_name>/stats.csv "$HOME\Documents"
 > are Linux servers, so the directory separator is `/`. When your data is in HDFS, use `/`, if your data is in 
 > `TS-D1MUTUA`, use `\`.
 
+## 5 Use sparklyr to connect to the spark cluster in interactive mode
 
-## 5. Check the spark client access
+The only way to interact with the spark cluster via `R` is to use the `sparklyr` package in `client mode` interactively. 
+To facilitate the usage of sparklyr with the kerberos authentication with the cluster, CASD has developed a `sparklyr wrapper`. 
+This wrapper is installed automatically by the `CASD Spark Installer`. It manages the entire lifecycle of the authentication token with the spark cluster .
+We will use the below code example to illustrate how to use this `sparklyr wrapper` to create connect to the spark cluster.
+
+> The package `SparkR` is deprecated as of Apache Spark 4.0 and will be removed in a future release. So CASD does not 
+> support this package anymore.
+
+> Don't worry if you don't understand some term such as `client mode`, we will explain it later. 
+
+You can find the complete R script of this example in `Documents\demo\04-sparklyr`, which allows you to create a spark session with 
+the CASD sparklyr wrapper on the cluster. It also demonstrates how to use R to read data from HDFS, and write results on the HDFS
+
+This script has four important blocks
+1. Importing CASD sparklyr wrapper 
+2. Configure spark session parameters(e.g. executor number, CPU and memory per executor, etc.)
+3. Initiate spark session with CASD sparklyr wrapper 
+4. Close the spark session
+
+###  5.1 Importing CASD sparklyr wrapper 
+
+The below R script shows how to import the `CASD sparklyr wrapper`. First, you need to install and import two R packages `sparklyr` 
+and `dplyr`. Then you import the `CASD sparklyr wrapper`.
+
+> **You can reuse the below code for any R script. Do not modify it**
+
+```R
+# The wrapper reqires the below packages, you only need to install it once
+install.packages("sparklyr")
+install.packages("dplyr")
+
+# Dynamically extract the current username
+current_user <- Sys.info()[["user"]]
+message(sprintf("Running Spark session for OS User: %s", current_user))
+
+# Construct CASD sparklyr wrapper path
+casd_conf_path <- file.path(
+  "C:", "Users", current_user, "AppData", "Local", 
+   "casd-tools", "casd-token-conf", "casd_spark.R"
+)
+# import CASD sparklyr wrapper
+if (file.exists(casd_conf_path)) {
+  source(casd_conf_path, encoding = "UTF-8")
+} else {
+  stop(sprintf("Configuration script not found at expected path: %s", casd_conf_path))
+}
+# import the required package
+library(sparklyr)
+library(dplyr)
+```
+
+> If you see error message such as `Configuration script not found at expected path`, It means your spark installation 
+> process does not end correctly. Try to rerun the installation script, if you still have this error message, please contact `datascience@casd.eu` and send us
+> the detailed error message stack.
+
+### 5.2 Configure spark session parameters
+
+Based on your job specifications, you can ajuster your spark session parameters such as:
+- executor numbers
+- executor cpu, memory
+- driver cpu, memory
+
+The below code is an example of how we set up basic spark session parameters. With this config, your spark session 
+has:
+- one driver with 1 vcore, 2 Gb memory
+- two executors with 1 vcore, 2 Gb memory
+
+> Based on your job, you can increase the number of executors, or the cpu and memory of executors. 
+```R
+# ==============================================================================
+# 1. Cluster Configuration & Network Settings
+# ==============================================================================
+config <- spark_config()
+
+# spark cluster Resource Allocation
+config$spark.executor.instances <- 2
+config$spark.executor.cores     <- 1
+config$spark.executor.memory    <- "2g"
+config$spark.driver.memory      <- "2g"
+config$spark.driver.cores      <- 1
+```
+
+The below configuration set up the network and security, you don't need to modify them
+
+```R
+# Network & Connectivity
+config$spark.driver.bindAddress <- "0.0.0.0"
+config$spark.submit.deployMode  <- "client"
+
+
+# Security Tokens for HDFS and Hive metastore delegation
+config$spark.yarn.security.tokens.hdfs.enabled <- "true"
+config$spark.yarn.security.tokens.hive.enabled <- "true"
+```
+
+### 5.3 Initiate spark session with CASD sparklyr wrapper
+
+Now we have all we need to initiate a spark session, let's start our spark session. This may take few seconds, please be
+patient.
+
+The below code shows an example on how to initiate spark session with CASD sparklyr wrapper, you can notice the syntax is
+a bit different from the standard sparklyr package.
+
+```R
+# Establish YARN Connection
+sc <- casd_spark_connect(master = "yarn", config = config)
+```
+
+> You may see some error messages about when sparklyr updating Rstudio connection pane: Rstudio can't find log file `logs/log4j.spark.log`
+> This error message does not impact the execution of your sparklyr code, you can just ignore it
+
+Once the spark session is created, you can do your usual sparklyr data analysis, this is zero syntaxe change.
+
+### 5.4 Close the spark session
+
+After you finish your analysis, you need to close your spark session. Otherwise, `the reserved resource can not be used by
+other users`. And If all the resources of the cluster are reserved, **no one can start a new spark session anymore**.
+
+```R
+# close the spark session and free the resources
+casd_spark_disconnect(sc)
+```
+
+> If you want to restart a spark session, you need to restart the R kernel to generate a new cluster authentication token.
+
+
+## 6. Create and submit a spark job
+
+
+### 6.1 Check the spark client access
 
 In this section, we will test if you can use the spark client to connect to the cluster.
 Use the same `Powershell terminal of section 4.1`.
@@ -170,7 +300,7 @@ Compiled by user on 2026-07-12T02:17:43Z
 
 ```
 
-### 5.1 Create and submit a spark job
+### 6.2 Submit a spark job written in python 
 
 We already created a pyspark job in `demo\02-spark-submit`, it's called `job1.py`.
 
@@ -184,28 +314,32 @@ cat .\job1.py
 ```
 
 To submit this job to the cluster, you need to run the below command
+
 ```shell
 # don't forget to replace your_name
 spark-submit --master yarn --deploy-mode cluster --name=test_spark_submit_<your_name> job1.py
 ```
 
 > You can notice in the above `spark-submit` command, there are two important options
-> - master is yarn : yarn is the resource manager(which job run on which worker).
+> - master is yarn : yarn is the resource manager(which job run on which worker node).
 > - deploy-mode cluster: spark driver will also run on the cluster side. So nothing runs inside 
 > `TS-D1MUTUA` server. As a result, you don't need to activate python environment and pyspark
 > You can check the status of your job via [yarn web UI](https://d1mutua-hdp-m01.casd.fr:8090/cluster).
 > We will see how to `run spark in client mode` in the next section. 
 
-> **The spark-submit only works in Powershell terminal**. 
+> **The spark-submit commands only works in Powershell terminal**. The spark job must be written in `Python, Scala, or Java`,
+> as a result, **R is not supported in spark-submit**.
  
 > To make the cluster token management is completely transparent for the end user, CASD has written
 > a script which overwrites the origin `spark-submit` command. This script is only activated in Powershell.
 > As a result, the `spark-submit` command will ont work in `CMD terminal` .
-> 
 
-### 5.2 Use pySpark to connect to the spark cluster in interactive mode
 
-We have seen how to submit jobs to the cluster. For exploring data, you may want to run your spark job interactively(client mode). 
+## 7 Use pySpark to connect to the spark cluster in interactive mode
+
+We have seen how to use `sparklyr` to connect to the spark cluster. For python user, you have a package called `pySpark`
+which allow you to run your spark job interactively(client mode). 
+
 In this mode the `spark driver` runs on `TS-D1MUTUA` server. So we need to install a `python virtual environment and pyspark`
 
 To do so, we need to open an `anaconda terminal`. Goto `Raccourcis`-> `Python`, double-click on `Miniconda Prompt Python3.13`, 
@@ -312,102 +446,75 @@ The block 9 will do two import things:
 2. Revoke the authentication token which allows you to connect to the cluster. It means you cannot create a new spark session
 on the cluster anymore. To generate a new authentication token, you need to click on the `Restart the kernel` button.
 
-### 5.3 Use sparklyr to connect to the spark cluster in interactive mode()
 
-To use sparklyr with the kerberos authentication in Windows, we also need a CASD sparklyr wrapper. This wrapper takes
-care of the cluster authentication token lifecycle.
+## 8. Client mode(sparklyr interactive) vs Cluster mode(spark-submit) 
 
-You can find a complete R script in `Documents\demo\04-sparklyr`, which allows you to create a spark session with sparklyr
-on the cluster and read data from HDFS, and write results on the HDFS
+We have presented the two major ways to use the spark cluster:
+- Interactive(client mode) : R via sparklyr, and python via pyspark
+- Batch(cluster mode) : spark-submit via pyspark
 
-This script has four important blocks
-- Importing CASD sparklyr wrapper
-- Configure spark session parameters(e.g. worker number, CPU and memory per worker, etc.)
-- Initiate spark session with CASD sparklyr wrapper
-- Close the spark session
+There are huge difference between the two modes, the below figure shows the architectural difference.
 
-The below R script shows how to import CASD sparklyr wrapper
-```R
-# The wrapper reqires the below packages, you only need to install it once
-install.packages("sparklyr")
-install.packages("dplyr")
+![spark_client_vs_cluster.jpg](../imgs/spark_client_vs_cluster.jpg).
 
-# Dynamically extract the current username
-current_user <- Sys.info()[["user"]]
-message(sprintf("Running Spark session for OS User: %s", current_user))
+You can notice that in client mode, the `spark driver process` runs on your local machine(e.g. `TS-D1MUTUA`), in cluster
+mode, all run on the cluster side(zero resource usage in `TS-D1MUTUA`).
 
-# Construct CASD sparklyr wrapper path
-casd_conf_path <- file.path(
-  "C:", "Users", current_user, "AppData", "Local", 
-   "casd-tools", "casd-token-conf", "casd_spark.R"
-)
-# import CASD sparklyr wrapper
-if (file.exists(casd_conf_path)) {
-  source(casd_conf_path, encoding = "UTF-8")
-} else {
-  stop(sprintf("Configuration script not found at expected path: %s", casd_conf_path))
-}
-# import the required package
-library(sparklyr)
-library(dplyr)
-```
+### 8.1 When to use spark-submit(Cluster mode) 
 
-Now we need to configure the cluster parameters
+When working with an `Apache Spark cluster`, compare to an `interactive sparklyr session`, the batch deployment via `spark-submit` 
+offers several architectural, operational, and performance advantages.
+- `Cluster deploy mode`: As we explained before, the `interactive sparklyr` only supports the client mode, where 
+     the `spark driver process` runs on your local machine(e.g. `TS-D1MUTUA`). With cluster mode, all processes run on 
+     the cluster(even the spark driver). It means Zero resource used inside `TS-D1MUTUA`.
+- `Job Lifecycle Independence`: the `interactive sparklyr` requires you keep an active and uninterrupted R session for 
+          the entire duration of the job on your local machine. If your connection drops, the job dies. With `spark-submit`,
+          once the job is submitted, the submitting client can safely disconnect. The job will be placed in a queue, when
+          resource is available, the job will be started and run on the cluster until completion.
+- `Minimized Network Latency`: With `interactive sparklyr`, as the spark driver process runs on your local machine(e.g. `TS-D1MUTUA`), 
+    the `driver-to-executor` communication between your local machine and the cluster is mandatory, if your spark job 
+       requires frequent data collections, this can cause substantial network saturation. With `spark-submit`, the driver 
+       lives inside the cluster infrastructure alongside the worker nodes, this can avoid network saturation.
+- `Predictable Resource Governance`: Interactive sessions tend to hold cluster resources open for long periods or idle durations.
+        With `spark-submit`, the reserved resources are released immediately upon job completion.
 
-```R
-# Safe connection state tracking
-sc <- NULL
+With the above advantages, the cluster mode is more suitable for 
+- `production environments`: If the data pipeline is mature and stable, and your spark job is in production.
+- `automated pipelines`: If your spark job is triggered by orchestrators like Apache Airflow, cron, or CI/CD pipelines.
+- `long-running job`: If your spark job take hours or days to finish, it's better to use cluster mode. 
 
-# Ensure YARN application containers are cleaned up even if the script throws an error
-on.exit({
-  if (!is.null(sc) && connection_is_open(sc)) {
-    message("Closing Spark connection and releasing YARN resources...")
-    casd_spark_disconnect(sc)
-  }
-}, add = TRUE)
+### 8.2 When to use sparklyr interactive
 
-# ==============================================================================
-# 1. Cluster Configuration & Network Settings
-# ==============================================================================
-config <- spark_config()
+Client mode offers several distinct advantages, particularly during the data exploratory, data pipeline development, 
+and debugging phases:
+- `Fast feedback`: In client mode, you can run commands line-by-line, and preview intermediate results at all time
+- `Simplified Debugging`: When an error or exception occurs, the full stack trace appears directly in your local R console. 
+       You don't have to hunt through distributed cluster log files
+- `local file interaction`: The driver process runs on your local machine, making it extremely easy to read local files, 
+              load small lookup datasets from your local disk and interact with the intermediate results.
 
-# YARN Resource Allocation
-config$spark.executor.instances <- 2
-config$spark.executor.cores     <- 1
-config$spark.executor.memory    <- "2g"
-config$spark.driver.memory      <- "2g"
+With the above advantages, the client mode is more suitable for
+- `Data Exploration`: If you are writing code line-by-line, inspecting data frames to understand your dataset.
+- `Prototyping and Debugging Complex data pipeline`: If you are prototyping a complex data pipeline, and encounter bugs.
+- `Local file system access`: If you need to read small local lookup tables, or write temporary artifacts directly to 
+          your local workstation during a test run.
 
-# Network & Connectivity
-config$spark.driver.bindAddress <- "0.0.0.0"
-config$spark.submit.deployMode  <- "client"
+## 9. How to size your spark session
+
+In this section, we explain several best practices for sizing your Spark session relative to your data volume.
+Before we start, let's understand some terms:
+- `worker node`: is a physical or virtual machine that provides CPUs, RAM, and local disk space. It can host `one or multiple executors`,
+       depending on how much CPU and memory the node has and how you configure your executor sizes.
+- `cluster manager`: is the `resource orchestrator` that sits between your Spark application (the Driver) and the underlying physical or virtual machines (Worker Nodes) 
+           in a distributed cluster. In our case, the cluster manager is 
+- `executor`: is a distributed JVM process launched on a `worker node` for the lifetime of a Spark application. It stores 
+         cached/persisted data partitions in memory or on local disk, then executes individual tasks (each task typically processes one data partition) 
+            using a pool of threads corresponding to its assigned CPU cores
+- `driver`: is a process which translates user commands(e.g. R/Python scripts) into a DAG(Directed Acyclic Graph) of execution stages and tasks. Then
+ it schedules tasks onto executors and collects results or status updates back from them.
 
 
-# Security Tokens for HDFS and Hive metastore delegation
-config$spark.yarn.security.tokens.hdfs.enabled <- "true"
-config$spark.yarn.security.tokens.hive.enabled <- "true"
-```
-Now we have all we need to initiate a spark session, let's start our spark session. This may take few seconds, please be
-patient.
+## 10. Advance optimization
 
-```R
-# Establish YARN Connection
-sc <- casd_spark_connect(master = "yarn", config = config)
-```
-
-> You may see some error messages about when sparklyr updating Rstudio connection pane: Rstudio can't find log file `logs/log4j.spark.log`
-> This error message does not impact the execution of your sparklyr code, you can just ignore it
-
-Once the spark session is created, you can do your usual sparklyr data analysis, this is zero syntaxe change.
-
-After you finish your analysis, you need to close your spark session. Otherwise, the reserved resource will never be
-freed.
-
-```R
-# close the spark session and free the resources
-casd_spark_disconnect(sc)
-```
-
-> If you want to restart a spark session, you need to restart the R kernel to generate a new cluster authentication token.
-
-
-
+Above all, spark is a distributed computing framework which depends on heavily the distributed storage framework(HDFS).
+To make your spark job more efficient, 
