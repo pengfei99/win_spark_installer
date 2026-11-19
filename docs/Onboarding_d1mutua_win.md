@@ -471,7 +471,7 @@ Below we list some general rules on how to size your spark session:
         too small (<10 MB), task scheduling overhead will overwhelm processing time (the "small files problem"). 
         If they are too large (>500 MB), you risk Out-Of-Memory (OOM) errors during shuffles. In our case, the data stored in
      the HDFS has the default partition size 128MB.
-- `executor memory size`: Keep executor memory sizes between `32 GB and 64 GB`. Because executor is a JVM process, and the 
+- `executor memory size`: Keep executor memory size `less than 64 GB`. Because an executor is a JVM process, and the 
         Java Garbage Collector (GC) struggles with heaps larger than 64 GB.  
 - `executor core size`: Keep executor core size between `2 and 6, commonly 4`. Giving an executor too many 
          cores (e.g., 16+) creates high I/O contention on the local disk and network interfaces, and hurts HDFS 
